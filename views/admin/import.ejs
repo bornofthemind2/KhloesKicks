@@ -1,0 +1,21 @@
+<h1>Import Products (CSV)</h1>
+<p>Use CSV with headers: name, brand, sku, size, description, image_url, highest_market_price</p>
+<% if (error) { %>
+  <div class="alert error"><%= error %></div>
+<% } %>
+<% if (success) { %>
+  <div class="alert success"><%= success %></div>
+<% } %>
+<form method="post" action="/admin/import" enctype="multipart/form-data" class="form">
+  <input type="file" name="csv" accept=".csv" required />
+  <button class="btn primary" type="submit">Upload</button>
+</form>
+
+<h2>Create Auction</h2>
+<form method="post" action="/admin/auctions" class="form">
+  <label>Product ID</label>
+  <input type="number" name="product_id" required />
+  <label>Starting Bid</label>
+  <input type="number" name="starting_bid" min="0" step="100" value="0" />
+  <button class="btn" type="submit">Create Auction (10 days)</button>
+</form>

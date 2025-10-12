@@ -1,0 +1,15 @@
+<h1>Payments</h1>
+<% if (!stripeClientId) { %>
+  <div class="alert error">STRIPE_CONNECT_CLIENT_ID is not set. Add it to your .env to enable onboarding.</div>
+<% } %>
+<% if (connectedId) { %>
+  <p>Connected Stripe Account: <strong><%= connectedId %></strong></p>
+  <form method="post" action="/admin/connect/disconnect">
+    <button class="btn">Disconnect</button>
+  </form>
+<% } else { %>
+  <p>No connected Stripe account. Connect your own account to collect payments directly.</p>
+  <form method="post" action="/admin/connect/start">
+    <button class="btn primary" type="submit">Connect with Stripe</button>
+  </form>
+<% } %>

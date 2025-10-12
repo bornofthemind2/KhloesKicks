@@ -1,0 +1,13 @@
+<h1>Register</h1>
+<% if (error) { %>
+  <div class="alert error"><%= error %></div>
+<% } %>
+<form method="post" action="/register" class="form">
+  <label>Name</label>
+  <input type="text" name="name" />
+  <label>Email</label>
+  <input type="email" name="email" required />
+  <label>Password</label>
+  <input type="password" name="password" required />
+  <button class="btn primary" type="submit">Create Account</button>
+</form>

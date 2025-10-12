@@ -1,0 +1,27 @@
+{
+  "name": "khloes-kicks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "start:win": "powershell -ExecutionPolicy Bypass -File start-server.ps1"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^9.6.0",
+    "body-parser": "^1.20.2",
+    "csv-parse": "^5.5.6",
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "express-ejs-layouts": "^2.5.1",
+    "express-session": "^1.18.2",
+    "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.15.0",
+    "stripe": "^16.9.0",
+    "uuid": "^9.0.1"
+  }
+}

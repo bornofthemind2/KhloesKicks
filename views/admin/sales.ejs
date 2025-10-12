@@ -1,0 +1,38 @@
+<h1>Sales Dashboard</h1>
+<h2>Open Auctions</h2>
+<table class="table">
+  <thead><tr><th>Auction</th><th>Leader</th><th>Current Bid</th><th>Ends</th></tr></thead>
+  <tbody>
+    <% openBids.forEach(b => { %>
+      <tr>
+        <td>#<%= b.auction_id %> - <%= b.brand %> <%= b.product_name %></td>
+        <td><%= b.leader_email || '-' %></td>
+        <td>$<%= b.current_bid || 0 %></td>
+        <td><%= dayjs(b.end_time).format('YYYY-MM-DD HH:mm') %></td>
+      </tr>
+    <% }) %>
+  </tbody>
+</table>
+
+<h2>Orders</h2>
+<table class="table">
+  <thead><tr><th>Order</th><th>Buyer</th><th>Product</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+    <% orders.forEach(o => { %>
+      <tr>
+        <td>#<%= o.id %></td>
+        <td><%= o.buyer_email %></td>
+        <td><%= o.brand %> <%= o.product_name %></td>
+        <td>$<%= o.amount %></td>
+        <td><%= o.status %></td>
+        <td>
+          <% if (o.status === 'paid') { %>
+            <form method="post" action="/admin/orders/<%= o.id %>/create-label">
+              <button class="btn">Create Shipping Label</button>
+            </form>
+          <% } %>
+        </td>
+      </tr>
+    <% }) %>
+  </tbody>
+</table>

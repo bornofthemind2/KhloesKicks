@@ -1,0 +1,232 @@
+<% if (featuredAuctions && featuredAuctions.length > 0) { %>
+  <section class="hero">
+    <h1 class="hero-title">Featured Kicks</h1>
+    <p class="hero-subtitle">Don't miss out on these premium sneakers</p>
+    <div class="hero-grid">
+      <% featuredAuctions.forEach(a => { %>
+        <div class="hero-card">
+          <% if (a.image_url) { %>
+            <img src="<%= a.image_url %>" class="hero-img" alt="<%= a.product_name %>" />
+          <% } %>
+          <div class="hero-content">
+            <div class="hero-badge"><%= a.brand %></div>
+            <h2><%= a.product_name %></h2>
+            <% if (a.description) { %>
+              <p class="hero-desc"><%= a.description %></p>
+            <% } %>
+            <div class="hero-stats">
+              <div class="stat">
+                <span class="stat-label">Current Bid</span>
+                <span class="stat-value">$<%= a.current_bid || a.starting_bid %></span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Market Value</span>
+                <span class="stat-value">$<%= a.highest_market_price %></span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Ends</span>
+                <span class="stat-value"><%= dayjs(a.end_time).format('MMM DD') %></span>
+              </div>
+            </div>
+            <a class="btn btn-hero" href="/auction/<%= a.id %>">
+              <span class="btn-hero-icon">⚡</span>
+              <span class="btn-hero-text">Place Bid Now</span>
+            </a>
+          </div>
+        </div>
+      <% }) %>
+    </div>
+  </section>
+<% } %>
+
+<section class="auctions-section">
+  <h1>All Open Auctions</h1>
+  <div class="grid">
+    <% auctions.forEach(a => { %>
+      <div class="card">
+        <% if (a.image_url) { %>
+          <img src="<%= a.image_url %>" class="thumb" alt="<%= a.product_name %>" />
+        <% } %>
+        <h3><%= a.brand %> - <%= a.product_name %></h3>
+        <p>Ends: <%= dayjs(a.end_time).format('YYYY-MM-DD HH:mm') %></p>
+        <p>Current bid: $<%= a.current_bid || a.starting_bid %></p>
+        <a class="btn" href="/auction/<%= a.id %>">View</a>
+      </div>
+    <% }) %>
+  </div>
+</section>
+
+<style>
+.hero {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 60px 20px;
+  margin: -24px -16px 40px;
+  border-radius: 0 0 20px 20px;
+  color: white;
+}
+.hero-title {
+  font-size: 3rem;
+  font-weight: bold;
+  text-align: center;
+  margin: 0 0 10px;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+}
+.hero-subtitle {
+  text-align: center;
+  font-size: 1.2rem;
+  margin: 0 0 40px;
+  opacity: 0.95;
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.hero-card {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  transition: transform 0.3s;
+}
+.hero-card:hover {
+  transform: translateY(-5px);
+}
+.hero-img {
+  width: 100%;
+  height: 250px;
+  object-fit: cover;
+}
+.hero-content {
+  padding: 20px;
+  color: #333;
+}
+.hero-badge {
+  display: inline-block;
+  background: #667eea;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.hero-content h2 {
+  margin: 0 0 10px;
+  font-size: 1.5rem;
+  color: #111;
+}
+.hero-desc {
+  color: #666;
+  margin: 0 0 20px;
+  line-height: 1.5;
+}
+.hero-stats {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 15px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+.stat {
+  flex: 1;
+  text-align: center;
+}
+.stat-label {
+  display: block;
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.stat-value {
+  display: block;
+  font-size: 18px;
+  font-weight: bold;
+  color: #111;
+}
+.btn-hero {
+  width: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+}
+.btn-hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  transition: left 0.5s;
+}
+.btn-hero:hover::before {
+  left: 100%;
+}
+.btn-hero:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
+  background: linear-gradient(135deg, #5568d3 0%, #6b4ba2 100%);
+}
+.btn-hero:active {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.5);
+}
+.btn-hero-icon {
+  font-size: 13px;
+  animation: pulse 2s infinite;
+}
+.btn-hero-text {
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+@media (max-width: 768px) {
+  .btn-hero {
+    width: 70%;
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+  .btn-hero-icon {
+    font-size: 12px;
+  }
+  .btn-hero-text {
+    font-size: 12px;
+  }
+}
+.auctions-section {
+  margin-top: 40px;
+}
+.auctions-section h1 {
+  margin-bottom: 24px;
+}
+</style>

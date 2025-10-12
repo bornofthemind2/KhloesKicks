@@ -1,0 +1,469 @@
+<div class="auction">
+  <div class="product-gallery">
+    <% 
+      // Collect all images: primary image_url + additional images
+      const allImages = [];
+      if (auction.image_url) {
+        allImages.push({ url: auction.image_url, isPrimary: true });
+      }
+      if (images && images.length > 0) {
+        images.forEach(img => {
+          allImages.push({ url: img.image_url, isPrimary: false, id: img.id });
+        });
+      }
+    %>
+    
+    <% if (allImages.length > 0) { %>
+      <!-- Main image display -->
+      <div class="main-image-container">
+        <img id="mainImage" src="<%= allImages[0].url %>" class="detail-img" alt="<%= auction.name %>" />
+      </div>
+      
+      <!-- Thumbnails -->
+      <% if (allImages.length > 1) { %>
+        <div class="image-thumbnails">
+          <% allImages.forEach((img, index) => { %>
+            <img 
+              src="<%= img.url %>" 
+              alt="Image <%= index + 1 %>" 
+              class="thumbnail <%= index === 0 ? 'active' : '' %>"
+              onclick="changeMainImage('<%= img.url %>', this)"
+            />
+          <% }) %>
+        </div>
+      <% } %>
+    <% } else { %>
+      <div class="no-image-placeholder">
+        <p>No images available</p>
+      </div>
+    <% } %>
+  </div>
+  <div>
+    <h2><%= auction.brand %> - <%= auction.name %></h2>
+    <p><%= auction.description %></p>
+    <p>Ends: <%= dayjs(auction.end_time).format('YYYY-MM-DD HH:mm') %></p>
+    <p>Highest market price: $<%= auction.highest_market_price %></p>
+    <p>Current bid: $<%= auction.current_bid || auction.starting_bid %></p>
+    
+    <% if (auction.buy_it_now_price && auction.buy_it_now_price > 0) { %>
+      <div class="buy-now-section">
+        <h3>Buy It Now</h3>
+        <p class="buy-now-price">$<%= auction.buy_it_now_price %></p>
+        <p class="buy-now-desc">Skip the auction and purchase immediately</p>
+        <% if (user) { %>
+          <form method="post" action="/buy-now/<%= auction.product_id %>">
+            <button class="btn btn-buy-now" type="submit">
+              🛒 Buy It Now - $<%= auction.buy_it_now_price %>
+            </button>
+          </form>
+          <p class="payment-methods">Accepts: Card, PayPal, Venmo (Cash App), Apple Pay</p>
+        <% } else { %>
+          <p><a href="/login">Login</a> to use Buy It Now</p>
+        <% } %>
+      </div>
+      <div class="divider">OR</div>
+    <% } %>
+    
+    <div class="bidding-section">
+      <h3>Place a Bid</h3>
+      <% if (user) { %>
+        <form method="post" action="/auction/<%= auction.auction_id %>/bid">
+          <label>Your bid (increments of $100):</label>
+          <input type="number" name="amount" step="100" min="100" required />
+          <button class="btn" type="submit">Place Bid</button>
+        </form>
+        <% if (auction.current_bid_user_id === user.id) { %>
+          <form method="post" action="/checkout/<%= auction.auction_id %>" style="margin-top:10px;">
+            <button class="btn primary" type="submit">Checkout current bid</button>
+          </form>
+        <% } %>
+      <% } else { %>
+        <p><a href="/login">Login</a> to bid</p>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<!-- Payment Methods Section -->
+<div class="payment-section">
+  <h3>💳 Accepted Payment Methods</h3>
+  <div class="payment-grid">
+    <div class="payment-item">
+      <div class="payment-icon">💳</div>
+      <div class="payment-name">Credit & Debit Cards</div>
+      <div class="payment-desc">Visa, Mastercard, Amex, Discover</div>
+    </div>
+    <div class="payment-item">
+      <div class="payment-icon">🅿️</div>
+      <div class="payment-name">PayPal</div>
+      <div class="payment-desc">Secure PayPal checkout</div>
+    </div>
+    <div class="payment-item">
+      <div class="payment-icon">💵</div>
+      <div class="payment-name">Venmo / Cash App</div>
+      <div class="payment-desc">Quick mobile payments</div>
+    </div>
+    <div class="payment-item">
+      <div class="payment-icon">🍎</div>
+      <div class="payment-name">Apple Pay</div>
+      <div class="payment-desc">One-tap checkout</div>
+    </div>
+    <div class="payment-item">
+      <div class="payment-icon">🏦</div>
+      <div class="payment-name">Bank Transfer</div>
+      <div class="payment-desc">Direct ACH transfers</div>
+    </div>
+  </div>
+  <p class="payment-note">🔒 All transactions are secured with 256-bit SSL encryption</p>
+</div>
+
+<!-- External Reviews Section -->
+<div class="reviews-section">
+  <h3>🌐 Check Reviews on Other Platforms</h3>
+  <p class="reviews-desc">See what others are saying about <%= auction.brand %> <%= auction.name %> on trusted sneaker platforms:</p>
+  <div class="review-links">
+    <a href="https://stockx.com/search?s=<%= encodeURIComponent(auction.brand + ' ' + auction.name) %>" target="_blank" rel="noopener" class="review-link">
+      <div class="review-logo">📊</div>
+      <div class="review-info">
+        <div class="review-site">StockX</div>
+        <div class="review-desc">Market data & reviews</div>
+      </div>
+      <div class="review-arrow">→</div>
+    </a>
+    <a href="https://www.goat.com/search?query=<%= encodeURIComponent(auction.brand + ' ' + auction.name) %>" target="_blank" rel="noopener" class="review-link">
+      <div class="review-logo">🐐</div>
+      <div class="review-info">
+        <div class="review-site">GOAT</div>
+        <div class="review-desc">Verified authentic reviews</div>
+      </div>
+      <div class="review-arrow">→</div>
+    </a>
+    <a href="https://www.nike.com/w?q=<%= encodeURIComponent(auction.brand + ' ' + auction.name) %>" target="_blank" rel="noopener" class="review-link">
+      <div class="review-logo">✔️</div>
+      <div class="review-info">
+        <div class="review-site">Nike.com</div>
+        <div class="review-desc">Official product details</div>
+      </div>
+      <div class="review-arrow">→</div>
+    </a>
+    <a href="https://www.farfetch.com/shopping/search/items.aspx?q=<%= encodeURIComponent(auction.brand + ' ' + auction.name) %>" target="_blank" rel="noopener" class="review-link">
+      <div class="review-logo">👜</div>
+      <div class="review-info">
+        <div class="review-site">Farfetch</div>
+        <div class="review-desc">Luxury marketplace reviews</div>
+      </div>
+      <div class="review-arrow">→</div>
+    </a>
+  </div>
+  <p class="reviews-disclaimer">⚠️ Reviews are from external sources. We are not affiliated with these platforms.</p>
+</div>
+
+<h3>Recent Bids</h3>
+<table class="table">
+  <thead><tr><th>Bidder</th><th>Amount</th><th>Time</th></tr></thead>
+  <tbody>
+    <% bids.forEach(b => { %>
+      <tr>
+        <td><%= b.email %></td>
+        <td>$<%= b.amount %></td>
+        <td><%= dayjs(b.created_at).format('YYYY-MM-DD HH:mm') %></td>
+      </tr>
+    <% }) %>
+  </tbody>
+</table>
+
+<style>
+.buy-now-section {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  padding: 24px;
+  border-radius: 12px;
+  color: white;
+  margin: 20px 0;
+  text-align: center;
+}
+.buy-now-section h3 {
+  margin: 0 0 10px;
+  font-size: 1.3rem;
+}
+.buy-now-price {
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin: 10px 0;
+}
+.buy-now-desc {
+  font-size: 0.95rem;
+  opacity: 0.95;
+  margin: 0 0 20px;
+}
+.btn-buy-now {
+  background: white;
+  color: #059669;
+  border: none;
+  padding: 14px 32px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.btn-buy-now:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+}
+.payment-methods {
+  margin-top: 12px;
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+.divider {
+  text-align: center;
+  font-weight: 600;
+  color: #6b7280;
+  margin: 24px 0;
+  position: relative;
+}
+.divider::before,
+.divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 40%;
+  height: 1px;
+  background: #d1d5db;
+}
+.divider::before {
+  left: 0;
+}
+.divider::after {
+  right: 0;
+}
+.bidding-section {
+  padding: 20px 0;
+}
+.bidding-section h3 {
+  margin-bottom: 15px;
+}
+
+/* Payment Methods Section */
+.payment-section {
+  background: #f9fafb;
+  padding: 30px;
+  border-radius: 12px;
+  margin: 30px 0;
+}
+.payment-section h3 {
+  margin: 0 0 20px;
+  font-size: 1.5rem;
+  color: #111;
+}
+.payment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 20px;
+}
+.payment-item {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transition: all 0.3s ease;
+}
+.payment-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+}
+.payment-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+}
+.payment-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #111;
+  margin-bottom: 5px;
+}
+.payment-desc {
+  font-size: 12px;
+  color: #6b7280;
+}
+.payment-note {
+  text-align: center;
+  font-size: 13px;
+  color: #059669;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* Reviews Section */
+.reviews-section {
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  border: 2px solid #e5e7eb;
+  margin: 30px 0;
+}
+.reviews-section h3 {
+  margin: 0 0 10px;
+  font-size: 1.5rem;
+  color: #111;
+}
+.reviews-desc {
+  color: #6b7280;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+.review-links {
+  display: grid;
+  gap: 12px;
+}
+.review-link {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  background: #f9fafb;
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.3s ease;
+  border: 1px solid #e5e7eb;
+}
+.review-link:hover {
+  background: #667eea;
+  color: white;
+  transform: translateX(5px);
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+.review-logo {
+  font-size: 28px;
+  margin-right: 15px;
+  min-width: 40px;
+  text-align: center;
+}
+.review-info {
+  flex: 1;
+}
+.review-site {
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+.review-desc {
+  font-size: 13px;
+  opacity: 0.8;
+}
+.review-arrow {
+  font-size: 24px;
+  font-weight: bold;
+  margin-left: 15px;
+}
+.review-link:hover .review-arrow {
+  transform: translateX(5px);
+}
+.reviews-disclaimer {
+  margin-top: 15px;
+  font-size: 12px;
+  color: #9ca3af;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .payment-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .payment-section, .reviews-section {
+    padding: 20px;
+  }
+}
+
+/* Image Gallery Styles */
+.product-gallery {
+  width: 100%;
+}
+.main-image-container {
+  width: 100%;
+  margin-bottom: 15px;
+  background: #f9fafb;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+.detail-img {
+  max-width: 100%;
+  max-height: 500px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+.image-thumbnails {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.thumbnail {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: #f3f4f6;
+}
+.thumbnail:hover {
+  border-color: #667eea;
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+.thumbnail.active {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+.no-image-placeholder {
+  width: 100%;
+  height: 300px;
+  background: #f3f4f6;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 16px;
+}
+
+@media (max-width: 768px) {
+  .main-image-container {
+    min-height: 250px;
+  }
+  .detail-img {
+    max-height: 300px;
+  }
+  .image-thumbnails {
+    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  }
+  .thumbnail {
+    height: 60px;
+  }
+}
+</style>
+
+<script>
+function changeMainImage(imageUrl, thumbnailElement) {
+  // Update main image
+  const mainImage = document.getElementById('mainImage');
+  mainImage.src = imageUrl;
+  
+  // Update active thumbnail
+  const thumbnails = document.querySelectorAll('.thumbnail');
+  thumbnails.forEach(thumb => thumb.classList.remove('active'));
+  thumbnailElement.classList.add('active');
+}
+</script>

@@ -1,0 +1,59 @@
+<h1>Products</h1>
+<table class="table">
+  <thead><tr><th>ID</th><th>Brand</th><th>Name</th><th>SKU</th><th>Size</th><th>Featured</th><th>Actions</th></tr></thead>
+  <tbody>
+    <% products.forEach(p => { %>
+      <tr>
+        <td><%= p.id %></td>
+        <td><%= p.brand %></td>
+        <td><%= p.name %></td>
+        <td><%= p.sku %></td>
+        <td><%= p.size %></td>
+        <td>
+          <% if (p.is_featured) { %>
+            <span class="badge badge-success">✓ Featured</span>
+          <% } else { %>
+            <span class="badge">Not Featured</span>
+          <% } %>
+        </td>
+        <td>
+          <a href="/products/<%= p.id %>/edit" class="btn btn-small">Edit</a>
+          <form method="post" action="/products/<%= p.id %>/toggle-featured" style="display: inline-block; margin-left: 5px;">
+            <button type="submit" class="btn btn-small <%= p.is_featured ? 'btn-warning' : 'btn-success' %>">
+              <%= p.is_featured ? 'Unfeature' : 'Feature' %>
+            </button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </tbody>
+</table>
+
+<style>
+.btn-small {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.btn-success {
+  background: #10b981;
+  color: white;
+  border-color: #10b981;
+}
+.btn-warning {
+  background: #f59e0b;
+  color: white;
+  border-color: #f59e0b;
+}
+.badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e5e7eb;
+  color: #6b7280;
+}
+.badge-success {
+  background: #d1fae5;
+  color: #065f46;
+}
+</style>
