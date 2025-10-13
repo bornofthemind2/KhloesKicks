@@ -13,6 +13,11 @@ import dayjs from 'dayjs';
 import Stripe from 'stripe';
 import fs from 'fs';
 import PDFDocument from 'pdfkit';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { body, validationResult } from 'express-validator';
+import winston from 'winston';
+import cors from 'cors';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,6 +26,41 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_secret';
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+
+// Configure Winston logger
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.errors({ stack: true }),
+    winston.format.json()
+  ),
+  defaultMeta: { service: 'sneaker-auction' },
+  transports: [
+    new winston.transports.File({ filename: 'error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'combined.log' }),
+    ...(process.env.NODE_ENV !== 'production' ? [new winston.transports.Console({
+      format: winston.format.simple()
+    })] : [])
+  ]
+});
+
+// Rate limiting configuration
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes  
+  max: 10, // limit each IP to 10 requests per windowMs for sensitive endpoints
+  message: 'Too many attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // DB setup - Use cloud-appropriate database path
 const dbPath = process.env.NODE_ENV === 'production' 
@@ -150,6 +190,57 @@ try {
   // Columns already exist, ignore error
 }
 
+// Create performance indexes
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_auctions_status ON auctions(status);
+    CREATE INDEX IF NOT EXISTS idx_auctions_end_time ON auctions(end_time);
+    CREATE INDEX IF NOT EXISTS idx_auctions_product_id ON auctions(product_id);
+    CREATE INDEX IF NOT EXISTS idx_bids_auction_id ON bids(auction_id);
+    CREATE INDEX IF NOT EXISTS idx_bids_user_id ON bids(user_id);
+    CREATE INDEX IF NOT EXISTS idx_bids_created_at ON bids(created_at);
+    CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+    CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+    CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
+    CREATE INDEX IF NOT EXISTS idx_products_is_featured ON products(is_featured);
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+  `);
+  logger.info('Database indexes created successfully');
+} catch (e) {
+  logger.warn('Some indexes may already exist:', e.message);
+}
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      scriptSrc: ["'self'", "https://js.stripe.com", "https://www.paypal.com"],
+      imgSrc: ["'self'", "data:", "https:", "http:"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      connectSrc: ["'self'", "https://api.stripe.com"]
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://*.onrender.com', 'https://*.railway.app'] 
+    : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  credentials: true
+}));
+
+// Apply rate limiting
+app.use(limiter);
+app.use('/admin', strictLimiter);
+app.use('/login', strictLimiter);
+app.use('/register', strictLimiter);
+app.use('/bid', strictLimiter);
+
 // Express setup
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -158,7 +249,16 @@ app.set('layout', 'layout');
 app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-app.use(session({ secret: SESSION_SECRET, resave: false, saveUninitialized: false }));
+app.use(session({ 
+  secret: SESSION_SECRET, 
+  resave: false, 
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
 
 // Multer for CSV uploads - use /tmp in production
 const uploadsDir = process.env.NODE_ENV === 'production' 
@@ -176,14 +276,45 @@ if (process.env.NODE_ENV === 'production') {
 
 const upload = multer({ dest: uploadsDir });
 
+// Input validation middleware
+function validateErrors(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    logger.warn('Validation errors:', { errors: errors.array(), ip: req.ip });
+    return res.status(400).json({ errors: errors.array() });
+  }
+  next();
+}
+
 // Helpers
 function ensureAuth(req, res, next) {
   if (req.session.user) return next();
+  logger.info('Unauthorized access attempt', { ip: req.ip, path: req.path });
   res.redirect('/login');
 }
 function ensureAdmin(req, res, next) {
   if (req.session.user && req.session.user.is_admin) return next();
+  logger.warn('Admin access denied', { user: req.session.user?.email, ip: req.ip });
   res.status(403).send('Forbidden');
+}
+
+// Fraud detection helper
+function detectSuspiciousActivity(req, action, details = {}) {
+  const suspiciousPatterns = {
+    rapidRequests: req.rateLimit?.current > 50,
+    newUserHighValue: details.amount > 1000 && req.session.user?.created_recently,
+    unusualHours: new Date().getHours() < 6 || new Date().getHours() > 23
+  };
+  
+  if (Object.values(suspiciousPatterns).some(Boolean)) {
+    logger.warn('Suspicious activity detected', {
+      action,
+      user: req.session.user?.email,
+      ip: req.ip,
+      patterns: suspiciousPatterns,
+      details
+    });
+  }
 }
 function allowedBrand(brand) {
   const b = String(brand || '').toLowerCase();

@@ -1,0 +1,261 @@
+<div class="payment-methods-container">
+  <h3>💳 Choose Payment Method</h3>
+  
+  <!-- Stripe Credit Card (Primary) -->
+  <div class="payment-option primary">
+    <div class="payment-header">
+      <div class="payment-icon">💳</div>
+      <div class="payment-info">
+        <h4>Credit/Debit Card</h4>
+        <p>Visa, Mastercard, Amex, Discover</p>
+      </div>
+      <div class="payment-badge">Most Popular</div>
+    </div>
+    <form method="POST" action="/checkout/<%= auction?.id || product?.id %>">
+      <input type="hidden" name="payment_method" value="stripe">
+      <button type="submit" class="btn-payment stripe">
+        🔒 Pay with Card
+      </button>
+    </form>
+  </div>
+
+  <!-- PayPal -->
+  <div class="payment-option">
+    <div class="payment-header">
+      <div class="payment-icon">🅿️</div>
+      <div class="payment-info">
+        <h4>PayPal</h4>
+        <p>Pay with your PayPal account</p>
+      </div>
+    </div>
+    <div id="paypal-button-container" class="paypal-container"></div>
+  </div>
+
+  <!-- Apple Pay (conditional) -->
+  <div class="payment-option apple-pay" id="apple-pay-option" style="display: none;">
+    <div class="payment-header">
+      <div class="payment-icon">🍎</div>
+      <div class="payment-info">
+        <h4>Apple Pay</h4>
+        <p>Touch ID or Face ID</p>
+      </div>
+    </div>
+    <button id="apple-pay-button" class="btn-payment apple">
+      Apple Pay
+    </button>
+  </div>
+
+  <!-- Google Pay (conditional) -->
+  <div class="payment-option google-pay" id="google-pay-option" style="display: none;">
+    <div class="payment-header">
+      <div class="payment-icon">🎯</div>
+      <div class="payment-info">
+        <h4>Google Pay</h4>
+        <p>One-tap checkout</p>
+      </div>
+    </div>
+    <div id="google-pay-button-container"></div>
+  </div>
+</div>
+
+<!-- PayPal SDK -->
+<% if (typeof amount !== 'undefined' && amount > 0) { %>
+<script src="https://www.paypal.com/sdk/js?client-id=<%= process.env.PAYPAL_CLIENT_ID || 'sb' %>&currency=USD"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // PayPal integration
+  if (typeof paypal !== 'undefined') {
+    paypal.Buttons({
+      style: {
+        layout: 'horizontal',
+        color: 'blue',
+        shape: 'pill',
+        label: 'pay',
+        height: 45
+      },
+      createOrder: function(data, actions) {
+        return actions.order.create({
+          purchase_units: [{
+            amount: {
+              value: '<%= amount %>'
+            },
+            description: '<%= description || "Sneaker Purchase" %>'
+          }]
+        });
+      },
+      onApprove: function(data, actions) {
+        return actions.order.capture().then(function(details) {
+          // Handle successful payment
+          window.location.href = '/order/<%= orderId || "new" %>/success';
+        });
+      },
+      onError: function(err) {
+        console.error('PayPal error:', err);
+        alert('Payment failed. Please try again.');
+      }
+    }).render('#paypal-button-container');
+  }
+
+  // Apple Pay detection
+  if (window.ApplePaySession && ApplePaySession.canMakePayments()) {
+    document.getElementById('apple-pay-option').style.display = 'block';
+    
+    document.getElementById('apple-pay-button').addEventListener('click', function() {
+      const request = {
+        countryCode: 'US',
+        currencyCode: 'USD',
+        supportedNetworks: ['visa', 'masterCard', 'amex', 'discover'],
+        merchantCapabilities: ['supports3DS'],
+        total: {
+          label: 'Khloe\'s Kicks',
+          amount: '<%= amount %>'
+        }
+      };
+      
+      const session = new ApplePaySession(3, request);
+      session.begin();
+    });
+  }
+
+  // Google Pay detection (simplified)
+  if (typeof google !== 'undefined' && google.payments) {
+    document.getElementById('google-pay-option').style.display = 'block';
+  }
+});
+</script>
+<% } %>
+
+<style>
+.payment-methods-container {
+  max-width: 500px;
+  margin: 20px auto;
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.payment-methods-container h3 {
+  text-align: center;
+  margin: 0 0 20px;
+  color: #333;
+}
+
+.payment-option {
+  margin-bottom: 15px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 15px;
+  transition: all 0.3s ease;
+}
+
+.payment-option:hover {
+  border-color: #667eea;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+
+.payment-option.primary {
+  border-color: #667eea;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+.payment-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.payment-icon {
+  font-size: 28px;
+  margin-right: 12px;
+}
+
+.payment-info {
+  flex: 1;
+}
+
+.payment-info h4 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: #111;
+}
+
+.payment-info p {
+  margin: 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.payment-badge {
+  background: #10b981;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.btn-payment {
+  width: 100%;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-payment.stripe {
+  background: linear-gradient(135deg, #635bff 0%, #4f46e5 100%);
+  color: white;
+}
+
+.btn-payment.stripe:hover {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(99, 91, 255, 0.4);
+}
+
+.btn-payment.apple {
+  background: #000;
+  color: white;
+}
+
+.btn-payment.apple:hover {
+  background: #333;
+  transform: translateY(-2px);
+}
+
+.paypal-container {
+  min-height: 45px;
+}
+
+#google-pay-button-container {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .payment-methods-container {
+    margin: 10px;
+    padding: 15px;
+  }
+  
+  .payment-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .payment-badge {
+    align-self: flex-end;
+  }
+}
+</style>
