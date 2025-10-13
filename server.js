@@ -211,9 +211,11 @@ try {
   logger.warn('Some indexes may already exist:', e.message);
 }
 
-// Security middleware
+// Security middleware (adjusted for development)
+const isProduction = process.env.NODE_ENV === 'production';
+
 app.use(helmet({
-  contentSecurityPolicy: {
+  contentSecurityPolicy: isProduction ? {
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
@@ -222,24 +224,29 @@ app.use(helmet({
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       connectSrc: ["'self'", "https://api.stripe.com"]
     }
-  },
+  } : false, // Disable CSP in development for easier testing
   crossOriginEmbedderPolicy: false
 }));
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
+  origin: isProduction 
     ? ['https://*.onrender.com', 'https://*.railway.app'] 
-    : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    : true, // Allow all origins in development
   credentials: true
 }));
 
-// Apply rate limiting
-app.use(limiter);
-app.use('/admin', strictLimiter);
-app.use('/login', strictLimiter);
-app.use('/register', strictLimiter);
-app.use('/bid', strictLimiter);
+// Apply rate limiting (only in production)
+if (process.env.NODE_ENV === 'production') {
+  app.use(limiter);
+  app.use('/admin', strictLimiter);
+  app.use('/login', strictLimiter);
+  app.use('/register', strictLimiter);
+  app.use('/bid', strictLimiter);
+  logger.info('Rate limiting enabled for production');
+} else {
+  logger.info('Rate limiting disabled for development');
+}
 
 // Express setup
 app.set('view engine', 'ejs');
@@ -696,6 +703,186 @@ app.get('/admin/sales', ensureAdmin, (req, res) => {
     ORDER BY datetime(a.end_time) ASC
   `).all();
   res.render('admin/sales', { user: req.session.user, orders, openBids, dayjs });
+});
+
+// CSV Export Products
+app.get('/admin/export/products', ensureAdmin, (req, res) => {
+  try {
+    const products = db.prepare(`
+      SELECT 
+        id,
+        brand,
+        name,
+        sku,
+        size,
+        description,
+        image_url,
+        highest_market_price,
+        is_featured,
+        buy_it_now_price
+      FROM products 
+      ORDER BY brand, name
+    `).all();
+
+    // Convert to CSV format
+    const csvHeaders = ['id', 'brand', 'name', 'sku', 'size', 'description', 'image_url', 'highest_market_price', 'is_featured', 'buy_it_now_price'];
+    let csvContent = csvHeaders.join(',') + '\n';
+    
+    products.forEach(product => {
+      const row = csvHeaders.map(header => {
+        let value = product[header] || '';
+        // Escape commas and quotes in CSV
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+          value = '"' + value.replace(/"/g, '""') + '"';
+        }
+        return value;
+      });
+      csvContent += row.join(',') + '\n';
+    });
+
+    // Set headers for file download
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `products-export-${timestamp}.csv`;
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    logger.info('CSV export requested', { 
+      admin: req.session.user.email, 
+      productsCount: products.length,
+      filename 
+    });
+    
+    res.send(csvContent);
+  } catch (error) {
+    logger.error('CSV export failed', { error: error.message, admin: req.session.user.email });
+    res.status(500).send('Export failed: ' + error.message);
+  }
+});
+
+// CSV Export Orders/Sales
+app.get('/admin/export/orders', ensureAdmin, (req, res) => {
+  try {
+    const orders = db.prepare(`
+      SELECT 
+        o.id,
+        o.order_type,
+        p.brand,
+        p.name as product_name,
+        p.sku,
+        p.size,
+        o.amount,
+        o.status,
+        u.email as buyer_email,
+        o.created_at,
+        o.stripe_session_id,
+        s.carrier as shipping_carrier,
+        s.tracking_number,
+        s.status as shipping_status
+      FROM orders o
+      LEFT JOIN auctions a ON a.id = o.auction_id
+      LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
+      LEFT JOIN users u ON u.id = o.user_id
+      LEFT JOIN shipments s ON s.order_id = o.id
+      ORDER BY datetime(o.created_at) DESC
+    `).all();
+
+    // Convert to CSV format
+    const csvHeaders = ['id', 'order_type', 'brand', 'product_name', 'sku', 'size', 'amount', 'status', 'buyer_email', 'created_at', 'stripe_session_id', 'shipping_carrier', 'tracking_number', 'shipping_status'];
+    let csvContent = csvHeaders.join(',') + '\n';
+    
+    orders.forEach(order => {
+      const row = csvHeaders.map(header => {
+        let value = order[header] || '';
+        // Escape commas and quotes in CSV
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+          value = '"' + value.replace(/"/g, '""') + '"';
+        }
+        return value;
+      });
+      csvContent += row.join(',') + '\n';
+    });
+
+    // Set headers for file download
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `orders-export-${timestamp}.csv`;
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    logger.info('Orders CSV export requested', { 
+      admin: req.session.user.email, 
+      ordersCount: orders.length,
+      filename 
+    });
+    
+    res.send(csvContent);
+  } catch (error) {
+    logger.error('Orders CSV export failed', { error: error.message, admin: req.session.user.email });
+    res.status(500).send('Export failed: ' + error.message);
+  }
+});
+
+// CSV Export Auctions
+app.get('/admin/export/auctions', ensureAdmin, (req, res) => {
+  try {
+    const auctions = db.prepare(`
+      SELECT 
+        a.id,
+        p.brand,
+        p.name as product_name,
+        p.sku,
+        p.size,
+        a.start_time,
+        a.end_time,
+        a.starting_bid,
+        a.current_bid,
+        a.status,
+        u.email as current_bidder_email,
+        p.highest_market_price
+      FROM auctions a
+      JOIN products p ON p.id = a.product_id
+      LEFT JOIN users u ON u.id = a.current_bid_user_id
+      ORDER BY datetime(a.created_at) DESC
+    `).all();
+
+    // Convert to CSV format
+    const csvHeaders = ['id', 'brand', 'product_name', 'sku', 'size', 'start_time', 'end_time', 'starting_bid', 'current_bid', 'status', 'current_bidder_email', 'highest_market_price'];
+    let csvContent = csvHeaders.join(',') + '\n';
+    
+    auctions.forEach(auction => {
+      const row = csvHeaders.map(header => {
+        let value = auction[header] || '';
+        // Escape commas and quotes in CSV
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+          value = '"' + value.replace(/"/g, '""') + '"';
+        }
+        return value;
+      });
+      csvContent += row.join(',') + '\n';
+    });
+
+    // Set headers for file download
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `auctions-export-${timestamp}.csv`;
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    logger.info('Auctions CSV export requested', { 
+      admin: req.session.user.email, 
+      auctionsCount: auctions.length,
+      filename 
+    });
+    
+    res.send(csvContent);
+  } catch (error) {
+    logger.error('Auctions CSV export failed', { error: error.message, admin: req.session.user.email });
+    res.status(500).send('Export failed: ' + error.message);
+  }
 });
 
 // Admin: create shipping label (FedEx or placeholder)
