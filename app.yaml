@@ -1,0 +1,45 @@
+runtime: nodejs20
+
+# App Engine will automatically set PORT environment variable
+env_variables:
+  NODE_ENV: production
+  SESSION_SECRET: khloeskicks-prod-session-2024-secure-key-v1
+  # Stripe configuration (replace with your actual keys before production use)
+  # STRIPE_SECRET_KEY: sk_test_your_stripe_secret_key_here
+  # STRIPE_WEBHOOK_SECRET: whsec_your_webhook_secret_here
+  # STRIPE_CONNECT_CLIENT_ID: ca_your_connect_client_id_here
+  
+  # FedEx shipping configuration (optional, for shipping labels)
+  # FEDEX_CLIENT_ID: your_fedex_client_id_here
+  # FEDEX_CLIENT_SECRET: your_fedex_client_secret_here
+  # FEDEX_ACCOUNT_NUMBER: your_fedex_account_number_here
+  
+  # Ship-from address configuration
+  SHIP_FROM_NAME: "Khloe's Kicks"
+  SHIP_FROM_ADDRESS1: "123 Sneaker Street"
+  SHIP_FROM_CITY: "Fashion City"
+  SHIP_FROM_STATE: "CA"
+  SHIP_FROM_ZIP: "90210"
+  SHIP_FROM_COUNTRY: "US"
+
+# Automatic scaling configuration
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10
+  target_cpu_utilization: 0.6
+
+# Health check configuration
+liveness_check:
+  path: "/"
+  check_interval_sec: 30
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 2
+
+readiness_check:
+  path: "/"
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 2
+  app_start_timeout_sec: 300

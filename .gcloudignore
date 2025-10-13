@@ -1,0 +1,76 @@
+# This file specifies files that are ignored by gcloud app deploy
+
+# Node dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Local development files
+.env
+.env.local
+.env.production.local
+.env.staging.local
+
+# Development database
+data.sqlite
+data.sqlite-shm
+data.sqlite-wal
+
+# Logs
+logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Temporary folders
+tmp/
+temp/
+
+# Local uploads
+uploads/
+labels/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+README.md
+
+# PowerShell scripts (if not needed in production)
+*.ps1
+
+# Test files
+test/
+tests/
+__tests__/
+*.test.js
+*.spec.js

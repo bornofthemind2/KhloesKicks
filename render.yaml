@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: khloes-kicks
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SHIP_FROM_NAME
+        value: "Khloe's Kicks"
+      - key: SHIP_FROM_ADDRESS1
+        value: "123 Sneaker Street"
+      - key: SHIP_FROM_CITY
+        value: "Fashion City"
+      - key: SHIP_FROM_STATE
+        value: "CA"
+      - key: SHIP_FROM_ZIP
+        value: "90210"
+      - key: SHIP_FROM_COUNTRY
+        value: "US"

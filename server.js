@@ -22,8 +22,11 @@ const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_secret';
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
-// DB setup
-const db = new Database(path.join(__dirname, 'data.sqlite'));
+// DB setup - Use cloud-appropriate database path
+const dbPath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/data.sqlite'  // Use /tmp for temporary storage in cloud
+  : path.join(__dirname, 'data.sqlite');
+const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
 
@@ -157,8 +160,21 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.use(session({ secret: SESSION_SECRET, resave: false, saveUninitialized: false }));
 
-// Multer for CSV uploads
-const upload = multer({ dest: path.join(__dirname, 'uploads') });
+// Multer for CSV uploads - use /tmp in production
+const uploadsDir = process.env.NODE_ENV === 'production' 
+  ? '/tmp/uploads' 
+  : path.join(__dirname, 'uploads');
+
+// Ensure directories exist in production
+if (process.env.NODE_ENV === 'production') {
+  ['/tmp/uploads', '/tmp/labels'].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  });
+}
+
+const upload = multer({ dest: uploadsDir });
 
 // Helpers
 function ensureAuth(req, res, next) {
@@ -325,8 +341,8 @@ app.post('/checkout/:auctionId', ensureAuth, async (req, res) => {
         },
         quantity: 1
       }],
-      success_url: `http://localhost:${PORT}/order/${orderId}/success`,
-      cancel_url: `http://localhost:${PORT}/order/${orderId}/cancel`
+      success_url: `${req.protocol}://${req.get('host')}/order/${orderId}/success`,
+      cancel_url: `${req.protocol}://${req.get('host')}/order/${orderId}/cancel`
     };
 
     if (connectedId) {
@@ -379,8 +395,8 @@ app.post('/buy-now/:productId', ensureAuth, async (req, res) => {
         },
         quantity: 1
       }],
-      success_url: `http://localhost:${PORT}/order/${orderId}/success`,
-      cancel_url: `http://localhost:${PORT}/order/${orderId}/cancel`
+      success_url: `${req.protocol}://${req.get('host')}/order/${orderId}/success`,
+      cancel_url: `${req.protocol}://${req.get('host')}/order/${orderId}/cancel`
     };
     
     if (connectedId) {
@@ -444,7 +460,7 @@ app.get('/admin/connect', ensureAdmin, (req, res) => {
 
 app.post('/admin/connect/start', ensureAdmin, (req, res) => {
   if (!process.env.STRIPE_CONNECT_CLIENT_ID) return res.status(500).send('STRIPE_CONNECT_CLIENT_ID not set');
-  const redirect = encodeURIComponent(`http://localhost:${PORT}/admin/connect/callback`);
+  const redirect = encodeURIComponent(`${req.protocol}://${req.get('host')}/admin/connect/callback`);
   const clientId = process.env.STRIPE_CONNECT_CLIENT_ID;
   const state = Math.random().toString(36).slice(2);
   // Store state if you want CSRF protection; omitted for brevity.
@@ -623,8 +639,8 @@ app.post('/admin/orders/:id/create-label', ensureAdmin, async (req, res) => {
       const tracking = shipData?.output?.transactionShipments?.[0]?.masterTrackingNumber || 'UNKNOWN';
       const labelUrl = shipData?.output?.transactionShipments?.[0]?.pieceResponses?.[0]?.packageDocuments?.[0]?.url || null;
 
-      const labelDir = path.join(__dirname, 'labels');
-      if (!fs.existsSync(labelDir)) fs.mkdirSync(labelDir);
+      const labelDir = process.env.NODE_ENV === 'production' ? '/tmp/labels' : path.join(__dirname, 'labels');
+      if (!fs.existsSync(labelDir)) fs.mkdirSync(labelDir, { recursive: true });
       const labelPath = path.join(labelDir, `label_order_${orderId}.txt`);
       // For URL_ONLY, save URL reference; alternatively fetch the file and save as PDF/PNG
       fs.writeFileSync(labelPath, `Label URL: ${labelUrl || 'N/A'}`);
@@ -639,8 +655,8 @@ app.post('/admin/orders/:id/create-label', ensureAdmin, async (req, res) => {
   }
 
   // Placeholder label
-  const labelDir = path.join(__dirname, 'labels');
-  if (!fs.existsSync(labelDir)) fs.mkdirSync(labelDir);
+  const labelDir = process.env.NODE_ENV === 'production' ? '/tmp/labels' : path.join(__dirname, 'labels');
+  if (!fs.existsSync(labelDir)) fs.mkdirSync(labelDir, { recursive: true });
   const labelPath = path.join(labelDir, `label_order_${orderId}.pdf`);
   const doc = new PDFDocument({ size: 'A4' });
   const stream = fs.createWriteStream(labelPath);

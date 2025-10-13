@@ -1,0 +1,45 @@
+{
+  "name": "khloes-kicks-auction",
+  "description": "Sneaker auction platform with bidding system",
+  "repository": "https://github.com/your-username/sneaker-auction",
+  "keywords": ["node", "express", "auction", "sneakers"],
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ],
+  "env": {
+    "NODE_ENV": {
+      "description": "Node environment",
+      "value": "production"
+    },
+    "SESSION_SECRET": {
+      "description": "Session secret for Express sessions",
+      "generator": "secret"
+    },
+    "SHIP_FROM_NAME": {
+      "description": "Shipping from name",
+      "value": "Khloe's Kicks"
+    },
+    "SHIP_FROM_ADDRESS1": {
+      "description": "Shipping from address",
+      "value": "123 Sneaker Street"
+    },
+    "SHIP_FROM_CITY": {
+      "description": "Shipping from city",
+      "value": "Fashion City"
+    },
+    "SHIP_FROM_STATE": {
+      "description": "Shipping from state",
+      "value": "CA"
+    },
+    "SHIP_FROM_ZIP": {
+      "description": "Shipping from ZIP",
+      "value": "90210"
+    },
+    "SHIP_FROM_COUNTRY": {
+      "description": "Shipping from country",
+      "value": "US"
+    }
+  }
+}
