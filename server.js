@@ -19,6 +19,7 @@ import { body, validationResult } from 'express-validator';
 import winston from 'winston';
 import cors from 'cors';
 import Razorpay from 'razorpay';
+import ShippingManager from './services/shippingManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,7 +27,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_secret';
-const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+// Stripe will be initialized after logger is defined
+let stripe = null;
 
 // Initialize Razorpay
 const razorpay = (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) 
@@ -35,6 +37,9 @@ const razorpay = (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET
       key_secret: process.env.RAZORPAY_KEY_SECRET
     })
   : null;
+
+// Initialize Shipping Manager (will be created after logger is defined)
+let shippingManager = null;
 
 // Configure Winston logger
 const logger = winston.createLogger({
@@ -53,6 +58,24 @@ const logger = winston.createLogger({
     })] : [])
   ]
 });
+
+// Initialize Stripe with proper error handling
+if (process.env.STRIPE_SECRET_KEY && 
+    !process.env.STRIPE_SECRET_KEY.includes('YOUR_ACTUAL') && 
+    !process.env.STRIPE_SECRET_KEY.includes('1234567890')) {
+  try {
+    stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+    logger.info('Stripe initialized successfully');
+  } catch (error) {
+    logger.error('Failed to initialize Stripe:', error.message);
+    stripe = null;
+  }
+} else {
+  logger.warn('Stripe not configured - using placeholder keys. Update .env with real keys from dashboard.stripe.com/test/apikeys');
+}
+
+// Initialize Shipping Manager with logger
+shippingManager = new ShippingManager(logger);
 
 // Rate limiting configuration
 const limiter = rateLimit({
@@ -209,6 +232,15 @@ try {
   // Columns already exist, ignore error
 }
 
+// Add product status and availability columns if they don't exist (migration)
+try {
+  db.exec('ALTER TABLE products ADD COLUMN status TEXT DEFAULT \'available\'');
+  db.exec('ALTER TABLE products ADD COLUMN is_available INTEGER DEFAULT 1');
+  logger.info('Added status and availability columns to products table');
+} catch (e) {
+  // Columns already exist, ignore error
+}
+
 // Create gateway analytics table if it doesn't exist
 try {
   db.exec(`
@@ -228,6 +260,86 @@ try {
   logger.error('Failed to create gateway analytics table:', e.message);
 }
 
+// Create comprehensive shipping tables
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shipping_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER,
+      carrier TEXT NOT NULL,
+      service_code TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      cost DECIMAL(10,2) NOT NULL,
+      currency TEXT DEFAULT 'USD',
+      transit_time TEXT,
+      delivery_date TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(order_id) REFERENCES orders(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS shipping_labels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shipment_id INTEGER NOT NULL,
+      carrier TEXT NOT NULL,
+      label_url TEXT,
+      label_data TEXT,
+      label_format TEXT DEFAULT 'PDF',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(shipment_id) REFERENCES shipments(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS tracking_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shipment_id INTEGER NOT NULL,
+      event_date TEXT NOT NULL,
+      event_time TEXT,
+      description TEXT NOT NULL,
+      location TEXT,
+      status_code TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(shipment_id) REFERENCES shipments(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS shipping_addresses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      type TEXT NOT NULL, -- 'from' or 'to'
+      name TEXT NOT NULL,
+      company TEXT,
+      address_line1 TEXT NOT NULL,
+      address_line2 TEXT,
+      city TEXT NOT NULL,
+      state TEXT NOT NULL,
+      postal_code TEXT NOT NULL,
+      country TEXT DEFAULT 'US',
+      phone TEXT,
+      email TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(order_id) REFERENCES orders(id)
+    );
+  `);
+  logger.info('Shipping tables created successfully');
+} catch (e) {
+  logger.error('Failed to create shipping tables:', e.message);
+}
+
+// Add enhanced shipping columns to shipments table
+try {
+  db.exec('ALTER TABLE shipments ADD COLUMN service_code TEXT');
+  db.exec('ALTER TABLE shipments ADD COLUMN service_name TEXT');
+  db.exec('ALTER TABLE shipments ADD COLUMN shipping_cost DECIMAL(10,2)');
+  db.exec('ALTER TABLE shipments ADD COLUMN weight DECIMAL(8,2)');
+  db.exec('ALTER TABLE shipments ADD COLUMN insurance_value DECIMAL(10,2)');
+  db.exec('ALTER TABLE shipments ADD COLUMN signature_required INTEGER DEFAULT 0');
+  db.exec('ALTER TABLE shipments ADD COLUMN estimated_delivery TEXT');
+  db.exec('ALTER TABLE shipments ADD COLUMN actual_delivery TEXT');
+  db.exec('ALTER TABLE shipments ADD COLUMN created_at TEXT');
+  db.exec('ALTER TABLE shipments ADD COLUMN updated_at TEXT');
+  logger.info('Added enhanced shipping columns to shipments table');
+} catch (e) {
+  // Columns already exist, ignore error
+}
+
 // Create performance indexes
 try {
   db.exec(`
@@ -243,6 +355,12 @@ try {
     CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
     CREATE INDEX IF NOT EXISTS idx_products_is_featured ON products(is_featured);
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_shipments_tracking_number ON shipments(tracking_number);
+    CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status);
+    CREATE INDEX IF NOT EXISTS idx_shipments_carrier ON shipments(carrier);
+    CREATE INDEX IF NOT EXISTS idx_shipping_rates_order_id ON shipping_rates(order_id);
+    CREATE INDEX IF NOT EXISTS idx_tracking_events_shipment_id ON tracking_events(shipment_id);
+    CREATE INDEX IF NOT EXISTS idx_shipping_addresses_order_id ON shipping_addresses(order_id);
   `);
   logger.info('Database indexes created successfully');
 } catch (e) {
@@ -597,10 +715,60 @@ app.post('/buy-now/:productId', ensureAuth, async (req, res) => {
 
 // Order status pages
 app.get('/order/:id/success', ensureAuth, (req, res) => {
-  res.send('Payment initiated. Awaiting confirmation via webhook.');
+  const orderId = Number(req.params.id);
+  
+  // Get order details
+  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(orderId, req.session.user.id);
+  if (!order) {
+    return res.status(404).send('Order not found');
+  }
+  
+  // Get product details
+  let product = null;
+  if (order.auction_id) {
+    // Auction-based order
+    const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
+    if (auction) {
+      product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+    }
+  } else if (order.product_id) {
+    // Direct buy-now order
+    product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+  }
+  
+  res.render('order-success', { 
+    user: req.session.user, 
+    order, 
+    product,
+    dayjs
+  });
 });
+
 app.get('/order/:id/cancel', ensureAuth, (req, res) => {
-  res.send('Payment canceled.');
+  const orderId = Number(req.params.id);
+  
+  // Get order details (optional - may not exist if user canceled before order creation)
+  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(orderId, req.session.user.id);
+  
+  // Get product details if order exists
+  let product = null;
+  if (order) {
+    if (order.auction_id) {
+      const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
+      if (auction) {
+        product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+      }
+    } else if (order.product_id) {
+      product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+    }
+  }
+  
+  res.render('order-cancel', { 
+    user: req.session.user, 
+    order, 
+    product,
+    dayjs
+  });
 });
 
 // Razorpay order creation
@@ -789,42 +957,420 @@ app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), (req, 
       const ship = session.shipping_details || session.customer_details || null;
       if (ship && ship.address) {
         const addr = ship.address;
-        db.prepare('INSERT INTO shipments (order_id, carrier, tracking_number, label_pdf_path, status, to_name, to_address1, to_address2, to_city, to_state, to_zip, to_country) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(order.id, 'fedex', null, null, 'pending', ship.name || null, addr.line1 || null, addr.line2 || null, addr.city || null, addr.state || addr.state_province || null, addr.postal_code || null, addr.country || null);
+        
+        // Store shipping address
+        db.prepare(`
+          INSERT INTO shipping_addresses (
+            order_id, type, name, address_line1, address_line2, 
+            city, state, postal_code, country, phone, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          order.id,
+          'to',
+          ship.name || 'Customer',
+          addr.line1 || null,
+          addr.line2 || null,
+          addr.city || null,
+          addr.state || addr.state_province || null,
+          addr.postal_code || null,
+          addr.country || 'US',
+          ship.phone || null,
+          dayjs().toISOString()
+        );
+        
+        // Auto-generate shipping label if enabled
+        if (process.env.AUTO_GENERATE_LABELS === 'true') {
+          setTimeout(async () => {
+            try {
+              await autoGenerateShippingLabel(order.id);
+            } catch (error) {
+              logger.error('Auto shipping label generation failed:', {
+                orderId: order.id,
+                error: error.message
+              });
+            }
+          }, 2000); // Small delay to ensure all data is committed
+        }
       }
     }
   }
   res.sendStatus(200);
 });
 
-// Stripe Connect onboarding (optional)
-app.get('/admin/connect', ensureAdmin, (req, res) => {
+// Helper function for automatic shipping label generation
+async function autoGenerateShippingLabel(orderId) {
+  try {
+    logger.info('Starting auto shipping label generation', { orderId });
+    
+    // Check if shipment already exists
+    const existingShipment = db.prepare('SELECT id FROM shipments WHERE order_id = ?').get(orderId);
+    if (existingShipment) {
+      logger.info('Shipment already exists, skipping auto-generation', { orderId });
+      return;
+    }
+    
+    // Get order details
+    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND status = \'paid\'').get(orderId);
+    if (!order) {
+      throw new Error('Order not found or not paid');
+    }
+    
+    // Get product details
+    let product = null;
+    if (order.auction_id) {
+      const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
+      if (auction) {
+        product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+      }
+    } else if (order.product_id) {
+      product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+    }
+    
+    if (!product) {
+      throw new Error('Product not found');
+    }
+    
+    // Get shipping address
+    const shippingAddress = db.prepare(`
+      SELECT * FROM shipping_addresses 
+      WHERE order_id = ? AND type = 'to' 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `).get(orderId);
+    
+    if (!shippingAddress) {
+      throw new Error('No shipping address found');
+    }
+    
+    // Build addresses
+    const fromAddress = {
+      name: process.env.SHIP_FROM_NAME || 'Khloe\'s Kicks',
+      line1: process.env.SHIP_FROM_ADDRESS1 || '123 Sneaker Street',
+      line2: process.env.SHIP_FROM_ADDRESS2 || '',
+      city: process.env.SHIP_FROM_CITY || 'Fashion City',
+      state: process.env.SHIP_FROM_STATE || 'CA',
+      zip: process.env.SHIP_FROM_ZIP || '90210',
+      country: process.env.SHIP_FROM_COUNTRY || 'US',
+      phone: process.env.SHIP_FROM_PHONE || '5551234567'
+    };
+    
+    const toAddress = {
+      name: shippingAddress.name,
+      line1: shippingAddress.address_line1,
+      line2: shippingAddress.address_line2,
+      city: shippingAddress.city,
+      state: shippingAddress.state,
+      zip: shippingAddress.postal_code,
+      country: shippingAddress.country || 'US',
+      phone: shippingAddress.phone || '5551234567'
+    };
+    
+    // Build shipment details
+    const shipmentDetails = shippingManager.buildShipmentDetails(
+      order, product, fromAddress, toAddress
+    );
+    
+    // Create optimal shipment
+    const labelResult = await shippingManager.createOptimalShipment(shipmentDetails);
+    
+    // Create shipment record
+    const shipmentId = db.prepare(`
+      INSERT INTO shipments (
+        order_id, carrier, service_code, tracking_number, 
+        shipping_cost, weight, status, to_name, to_address1, to_address2, 
+        to_city, to_state, to_zip, to_country, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      orderId,
+      labelResult.carrier,
+      'AUTO',
+      labelResult.trackingNumber,
+      labelResult.cost,
+      shipmentDetails.weight,
+      'created',
+      toAddress.name,
+      toAddress.line1,
+      toAddress.line2 || null,
+      toAddress.city,
+      toAddress.state,
+      toAddress.zip,
+      toAddress.country,
+      dayjs().toISOString(),
+      dayjs().toISOString()
+    ).lastInsertRowid;
+    
+    // Store shipping label if available
+    if (labelResult.labelUrl) {
+      db.prepare(`
+        INSERT INTO shipping_labels (shipment_id, carrier, label_url, label_format, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        shipmentId,
+        labelResult.carrier,
+        labelResult.labelUrl,
+        'PDF',
+        dayjs().toISOString()
+      );
+    }
+    
+    logger.info('Auto shipping label generated successfully', {
+      orderId,
+      shipmentId,
+      carrier: labelResult.carrier,
+      trackingNumber: labelResult.trackingNumber,
+      cost: labelResult.cost
+    });
+    
+    // Send shipping notification email (if email is configured)
+    if (process.env.SMTP_HOST && process.env.FROM_EMAIL) {
+      try {
+        const user = db.prepare('SELECT email, name FROM users WHERE id = ?').get(order.user_id);
+        if (user?.email) {
+          await sendShippingNotification({
+            orderId,
+            trackingNumber: labelResult.trackingNumber,
+            carrier: labelResult.carrier,
+            customerEmail: user.email,
+            customerName: user.name,
+            productName: `${product.brand} ${product.name}`
+          });
+        }
+      } catch (emailError) {
+        logger.warn('Failed to send shipping notification email', {
+          orderId,
+          error: emailError.message
+        });
+      }
+    }
+    
+    return {
+      success: true,
+      shipmentId,
+      trackingNumber: labelResult.trackingNumber,
+      carrier: labelResult.carrier,
+      cost: labelResult.cost
+    };
+    
+  } catch (error) {
+    logger.error('Auto shipping label generation failed', {
+      orderId,
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+}
+
+// Simple email notification function (placeholder)
+async function sendShippingNotification(details) {
+  logger.info('Shipping notification would be sent', {
+    to: details.customerEmail,
+    trackingNumber: details.trackingNumber,
+    carrier: details.carrier
+  });
+  
+  // In a real implementation, you would use a service like:
+  // - NodeMailer with SMTP
+  // - SendGrid API
+  // - AWS SES
+  // - Mailgun API
+  
+  // Example email content:
+  const emailContent = `
+    Hi ${details.customerName || 'Customer'},
+    
+    Great news! Your order #${details.orderId} for ${details.productName} has shipped!
+    
+    Tracking Information:
+    Carrier: ${details.carrier.toUpperCase()}
+    Tracking Number: ${details.trackingNumber}
+    
+    Track your package: ${process.env.BASE_URL || 'http://localhost:3000'}/track/${details.trackingNumber}
+    
+    Thanks for shopping with Khloe's Kicks!
+  `;
+  
+  // TODO: Implement actual email sending
+  console.log('Email notification (placeholder):', {
+    to: details.customerEmail,
+    subject: `Your order #${details.orderId} has shipped!`,
+    content: emailContent
+  });
+}
+
+// Helper function to get Stripe Connect account details
+async function getStripeConnectAccountDetails(accountId) {
+  if (!stripe || !accountId) return null;
+  
+  try {
+    const account = await stripe.accounts.retrieve(accountId);
+    return {
+      id: account.id,
+      email: account.email,
+      displayName: account.display_name || account.business_profile?.name,
+      country: account.country,
+      currency: account.default_currency,
+      payoutsEnabled: account.payouts_enabled,
+      chargesEnabled: account.charges_enabled,
+      detailsSubmitted: account.details_submitted,
+      type: account.type
+    };
+  } catch (error) {
+    logger.error('Failed to retrieve Stripe account details:', error);
+    return null;
+  }
+}
+
+// Admin route to test Stripe Connect integration
+app.get('/admin/connect/test', ensureAdmin, async (req, res) => {
   const connectedId = getSetting('stripe_connected_account_id');
-  res.render('admin/connect', { user: req.session.user, connectedId, stripeClientId: process.env.STRIPE_CONNECT_CLIENT_ID || null, error: null });
+  
+  if (!connectedId) {
+    return res.json({ 
+      success: false, 
+      error: 'No connected Stripe account found' 
+    });
+  }
+  
+  try {
+    const accountDetails = await getStripeConnectAccountDetails(connectedId);
+    
+    if (!accountDetails) {
+      return res.json({ 
+        success: false, 
+        error: 'Failed to retrieve account details from Stripe' 
+      });
+    }
+    
+    res.json({
+      success: true,
+      account: accountDetails,
+      integration: {
+        canProcessPayments: accountDetails.chargesEnabled && accountDetails.payoutsEnabled,
+        readyForProduction: accountDetails.detailsSubmitted,
+        accountType: accountDetails.type
+      }
+    });
+    
+  } catch (error) {
+    logger.error('Stripe Connect test failed:', error);
+    res.json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Stripe Connect onboarding (optional)
+app.get('/admin/connect', ensureAdmin, async (req, res) => {
+  const connectedId = getSetting('stripe_connected_account_id');
+  const connectionData = getSetting('stripe_connection_data');
+  const clientId = process.env.STRIPE_CLIENT_ID || 'acct_1SHckxHd2ZDTrw8M';
+  
+  let parsedConnectionData = null;
+  try {
+    parsedConnectionData = connectionData ? JSON.parse(connectionData) : null;
+  } catch (e) {
+    logger.warn('Failed to parse Stripe connection data', e);
+  }
+  
+  // Get detailed account info from Stripe if connected
+  let accountDetails = null;
+  if (connectedId) {
+    accountDetails = await getStripeConnectAccountDetails(connectedId);
+  }
+  
+  res.render('admin/connect', { 
+    user: req.session.user, 
+    connectedId, 
+    connectionData: parsedConnectionData,
+    accountDetails,
+    stripeClientId: clientId, 
+    error: req.query.error || null,
+    success: req.query.success || null,
+    disconnected: req.query.disconnected || null
+  });
 });
 
 app.post('/admin/connect/start', ensureAdmin, (req, res) => {
-  if (!process.env.STRIPE_CONNECT_CLIENT_ID) return res.status(500).send('STRIPE_CONNECT_CLIENT_ID not set');
+  // Use your Stripe client ID
+  const clientId = process.env.STRIPE_CLIENT_ID || 'acct_1SHckxHd2ZDTrw8M';
+  if (!clientId) return res.status(500).send('Stripe Connect not configured');
+  
   const redirect = encodeURIComponent(`${req.protocol}://${req.get('host')}/admin/connect/callback`);
-  const clientId = process.env.STRIPE_CONNECT_CLIENT_ID;
   const state = Math.random().toString(36).slice(2);
-  // Store state if you want CSRF protection; omitted for brevity.
-  const url = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${redirect}`;
+  
+  // Store state for CSRF protection
+  req.session.stripeConnectState = state;
+  
+  const url = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${redirect}&state=${state}`;
+  
+  logger.info('Stripe Connect initiated', {
+    clientId,
+    redirectUri: redirect,
+    admin: req.session.user.email
+  });
+  
   res.redirect(url);
 });
 
 app.get('/admin/connect/callback', ensureAdmin, async (req, res) => {
   if (!stripe) return res.status(500).send('Stripe not configured');
-  const { code, error } = req.query;
-  if (error) return res.status(400).send('Stripe connect error');
+  const { code, error, state } = req.query;
+  
+  if (error) {
+    logger.error('Stripe Connect OAuth error:', error);
+    return res.status(400).send(`Stripe Connect error: ${error}`);
+  }
+  
+  if (!code) return res.status(400).send('No authorization code received');
+  
+  // Validate state for CSRF protection
+  if (!state || state !== req.session.stripeConnectState) {
+    logger.warn('Stripe Connect state mismatch', { 
+      expected: req.session.stripeConnectState, 
+      received: state 
+    });
+    return res.status(400).send('Invalid state parameter');
+  }
+  
   try {
-    const token = await stripe.oauth.token({ grant_type: 'authorization_code', code: code });
+    const token = await stripe.oauth.token({ 
+      grant_type: 'authorization_code', 
+      code: code 
+    });
+    
     if (token && token.stripe_user_id) {
+      // Save the connected account details
+      const connectionData = {
+        accountId: token.stripe_user_id,
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token,
+        tokenType: token.token_type,
+        scope: token.scope,
+        connectedAt: new Date().toISOString(),
+        connectedBy: req.session.user.email
+      };
+      
+      // Save to settings
       setSetting('stripe_connected_account_id', token.stripe_user_id);
+      setSetting('stripe_connection_data', JSON.stringify(connectionData));
+      
+      logger.info('Stripe Connect successful', {
+        accountId: token.stripe_user_id,
+        scope: token.scope,
+        connectedBy: req.session.user.email
+      });
+      
+      // Clear the state from session
+      delete req.session.stripeConnectState;
+      
+      res.redirect('/admin/connect?success=1&account=' + token.stripe_user_id);
+    } else {
+      res.redirect('/admin/connect?error=no_account');
     }
-    res.redirect('/admin/connect');
   } catch (e) {
-    console.error(e);
+    logger.error('Stripe Connect token exchange error:', e);
     res.status(500).send('Stripe connect exchange failed');
   }
 });
@@ -832,15 +1378,32 @@ app.get('/admin/connect/callback', ensureAdmin, async (req, res) => {
 app.post('/admin/connect/disconnect', ensureAdmin, async (req, res) => {
   // For a full disconnect, you can deauthorize via stripe.oauth.deauthorize
   const connectedId = getSetting('stripe_connected_account_id');
-  if (connectedId && process.env.STRIPE_CONNECT_CLIENT_ID) {
+  const clientId = process.env.STRIPE_CLIENT_ID || 'acct_1SHckxHd2ZDTrw8M';
+  
+  if (connectedId && clientId) {
     try {
-      await stripe.oauth.deauthorize({ client_id: process.env.STRIPE_CONNECT_CLIENT_ID, stripe_user_id: connectedId });
+      await stripe.oauth.deauthorize({ 
+        client_id: clientId, 
+        stripe_user_id: connectedId 
+      });
+      
+      logger.info('Stripe Connect disconnected', {
+        accountId: connectedId,
+        disconnectedBy: req.session.user.email
+      });
     } catch (e) {
-      console.warn('Deauthorize failed or not permitted', e.message);
+      logger.warn('Stripe deauthorize failed or not permitted', {
+        error: e.message,
+        accountId: connectedId
+      });
     }
   }
+  
+  // Clear all Stripe connection settings
   setSetting('stripe_connected_account_id', '');
-  res.redirect('/admin/connect');
+  setSetting('stripe_connection_data', '');
+  
+  res.redirect('/admin/connect?disconnected=1');
 });
 
 // Admin: CSV import
@@ -1293,7 +1856,18 @@ app.get('/products/:id/edit', ensureAdmin, (req, res) => {
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
   if (!product) return res.status(404).send('Product not found');
   const images = db.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY display_order, id').all(id);
-  res.render('admin/edit-product', { user: req.session.user, product, images, error: null, success: null });
+  
+  // Check for active auction for this product
+  const activeAuction = db.prepare('SELECT * FROM auctions WHERE product_id = ? AND status = ? ORDER BY id DESC LIMIT 1').get(id, 'open');
+  
+  res.render('admin/edit-product', { 
+    user: req.session.user, 
+    product, 
+    images, 
+    activeAuction, 
+    error: null, 
+    success: null 
+  });
 });
 
 // Toggle featured status
@@ -1319,10 +1893,12 @@ app.post('/products/:id/edit', ensureAdmin, (req, res) => {
   const brandTrimmed = (brand || '').trim();
   
   if (!allowedBrand(brandTrimmed)) {
+    const activeAuction = db.prepare('SELECT * FROM auctions WHERE product_id = ? AND status = ? ORDER BY id DESC LIMIT 1').get(id, 'open');
     return res.render('admin/edit-product', { 
       user: req.session.user, 
       product,
       images, 
+      activeAuction,
       error: 'Brand must be one of: Nike, Adidas, Reebok, New Balance', 
       success: null 
     });
@@ -1347,18 +1923,22 @@ app.post('/products/:id/edit', ensureAdmin, (req, res) => {
     
     const updatedProduct = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
     const updatedImages = db.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY display_order, id').all(id);
+    const activeAuction = db.prepare('SELECT * FROM auctions WHERE product_id = ? AND status = ? ORDER BY id DESC LIMIT 1').get(id, 'open');
     res.render('admin/edit-product', { 
       user: req.session.user, 
       product: updatedProduct,
       images: updatedImages, 
+      activeAuction,
       error: null, 
       success: 'Product updated successfully!' 
     });
   } catch (e) {
+    const activeAuction = db.prepare('SELECT * FROM auctions WHERE product_id = ? AND status = ? ORDER BY id DESC LIMIT 1').get(id, 'open');
     res.render('admin/edit-product', { 
       user: req.session.user, 
       product,
       images, 
+      activeAuction,
       error: 'Failed to update product: ' + e.message, 
       success: null 
     });
@@ -1403,6 +1983,856 @@ app.delete('/api/products/:productId/images/:imageId', ensureAdmin, (req, res) =
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: 'Failed to delete image: ' + e.message });
+  }
+});
+
+// API: Create auction
+app.post('/api/auctions', ensureAdmin, (req, res) => {
+  const { product_id, starting_bid, duration, reserve_price } = req.body;
+  
+  if (!product_id || !starting_bid || !duration) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  const productId = Number(product_id);
+  const startingBid = Number(starting_bid);
+  const durationDays = Number(duration);
+  
+  // Check if product exists
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  
+  // Check if product already has an active auction
+  const existingAuction = db.prepare('SELECT * FROM auctions WHERE product_id = ? AND status = ?').get(productId, 'open');
+  if (existingAuction) {
+    return res.status(400).json({ error: 'Product already has an active auction' });
+  }
+  
+  try {
+    const start = dayjs();
+    const end = start.add(durationDays, 'day');
+    
+    const auctionData = {
+      product_id: productId,
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
+      starting_bid: startingBid,
+      status: 'open'
+    };
+    
+    const result = db.prepare(`
+      INSERT INTO auctions (product_id, start_time, end_time, starting_bid, status) 
+      VALUES (?, ?, ?, ?, ?)
+    `).run(productId, auctionData.start_time, auctionData.end_time, startingBid, 'open');
+    
+    logger.info('Auction created', {
+      auctionId: result.lastInsertRowid,
+      productId,
+      startingBid,
+      duration: durationDays,
+      createdBy: req.session.user.email
+    });
+    
+    res.json({ 
+      success: true, 
+      auctionId: result.lastInsertRowid,
+      message: 'Auction created successfully'
+    });
+  } catch (e) {
+    logger.error('Failed to create auction', { error: e.message, productId, startingBid });
+    res.status(500).json({ error: 'Failed to create auction: ' + e.message });
+  }
+});
+
+// API: End auction
+app.post('/api/auctions/:id/end', ensureAdmin, (req, res) => {
+  const auctionId = Number(req.params.id);
+  
+  const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(auctionId);
+  if (!auction) {
+    return res.status(404).json({ error: 'Auction not found' });
+  }
+  
+  if (auction.status !== 'open') {
+    return res.status(400).json({ error: 'Auction is not active' });
+  }
+  
+  try {
+    db.prepare('UPDATE auctions SET status = ? WHERE id = ?').run('ended', auctionId);
+    
+    logger.info('Auction ended manually', {
+      auctionId,
+      endedBy: req.session.user.email
+    });
+    
+    res.json({ success: true, message: 'Auction ended successfully' });
+  } catch (e) {
+    logger.error('Failed to end auction', { error: e.message, auctionId });
+    res.status(500).json({ error: 'Failed to end auction: ' + e.message });
+  }
+});
+
+// API: Mark product as sold out
+app.post('/api/products/:id/sold-out', ensureAdmin, (req, res) => {
+  const productId = Number(req.params.id);
+  
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  
+  try {
+    // Update product status to sold out and mark as unavailable
+    db.prepare('UPDATE products SET status = ?, is_available = ? WHERE id = ?').run('sold_out', 0, productId);
+    
+    // End any active auctions for this product
+    db.prepare('UPDATE auctions SET status = ? WHERE product_id = ? AND status = ?').run('ended', productId, 'open');
+    
+    logger.info('Product marked as sold out', {
+      productId,
+      productName: `${product.brand} ${product.name}`,
+      markedBy: req.session.user.email
+    });
+    
+    res.json({ success: true, message: 'Product marked as sold out' });
+  } catch (e) {
+    logger.error('Failed to mark product as sold out', { error: e.message, productId });
+    res.status(500).json({ error: 'Failed to mark as sold out: ' + e.message });
+  }
+});
+
+// API: Toggle product availability
+app.post('/api/products/:id/toggle-availability', ensureAdmin, (req, res) => {
+  const productId = Number(req.params.id);
+  
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+  
+  try {
+    const newAvailability = product.is_available ? 0 : 1;
+    const newStatus = newAvailability ? 'available' : 'unavailable';
+    
+    db.prepare('UPDATE products SET is_available = ?, status = ? WHERE id = ?').run(newAvailability, newStatus, productId);
+    
+    logger.info('Product availability toggled', {
+      productId,
+      productName: `${product.brand} ${product.name}`,
+      newAvailability: !!newAvailability,
+      toggledBy: req.session.user.email
+    });
+    
+    res.json({ 
+      success: true, 
+      available: !!newAvailability,
+      message: `Product is now ${newAvailability ? 'available' : 'unavailable'}` 
+    });
+  } catch (e) {
+    logger.error('Failed to toggle product availability', { error: e.message, productId });
+    res.status(500).json({ error: 'Failed to toggle availability: ' + e.message });
+  }
+});
+
+// ===== SHIPPING ROUTES =====
+
+// Admin Shipping Dashboard
+app.get('/admin/shipping', ensureAdmin, async (req, res) => {
+  try {
+    // Get pending shipments (paid orders without shipments)
+    const pendingShipments = db.prepare(`
+      SELECT o.*, 
+        u.email as buyer_email,
+        p.name as product_name, p.brand,
+        s.to_city, s.to_state
+      FROM orders o
+      JOIN users u ON u.id = o.user_id
+      LEFT JOIN auctions a ON a.id = o.auction_id
+      LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
+      LEFT JOIN shipments s ON s.order_id = o.id
+      WHERE o.status = 'paid' AND s.id IS NULL
+      ORDER BY o.created_at DESC
+    `).all();
+
+    // Get active shipments
+    const activeShipments = db.prepare(`
+      SELECT s.*, o.id as order_id
+      FROM shipments s
+      JOIN orders o ON o.id = s.order_id
+      WHERE s.status NOT IN ('delivered', 'cancelled')
+      ORDER BY s.created_at DESC
+    `).all();
+
+    // Get in-transit shipments
+    const inTransitShipments = activeShipments.filter(s => 
+      ['in_transit', 'out_for_delivery', 'shipped'].includes(s.status)
+    );
+
+    // Get delivered today count
+    const today = dayjs().format('YYYY-MM-DD');
+    const deliveredToday = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM shipments
+      WHERE status = 'delivered' AND DATE(actual_delivery) = ?
+    `).get(today)?.count || 0;
+
+    // Get available carriers
+    const availableCarriers = shippingManager.getAvailableCarriers();
+
+    res.render('admin/shipping', {
+      user: req.session.user,
+      pendingShipments,
+      activeShipments,
+      inTransitShipments,
+      deliveredToday,
+      availableCarriers,
+      dayjs
+    });
+  } catch (error) {
+    logger.error('Error loading shipping dashboard:', error);
+    res.status(500).send('Error loading shipping dashboard');
+  }
+});
+
+// Get shipping rates
+app.post('/admin/shipping/rates', ensureAdmin, async (req, res) => {
+  try {
+    const { orderId, weight, length, width, height, toName, toAddress1, toAddress2, toCity, toState, toZip } = req.body;
+
+    // Build from address (from environment)
+    const fromAddress = {
+      name: process.env.SHIP_FROM_NAME || 'Khloe\'s Kicks',
+      line1: process.env.SHIP_FROM_ADDRESS1 || '123 Sneaker Street',
+      line2: process.env.SHIP_FROM_ADDRESS2 || '',
+      city: process.env.SHIP_FROM_CITY || 'Fashion City',
+      state: process.env.SHIP_FROM_STATE || 'CA',
+      zip: process.env.SHIP_FROM_ZIP || '90210',
+      country: process.env.SHIP_FROM_COUNTRY || 'US'
+    };
+
+    // Build to address
+    const toAddress = {
+      name: toName,
+      line1: toAddress1,
+      line2: toAddress2,
+      city: toCity,
+      state: toState,
+      zip: toZip,
+      country: 'US'
+    };
+
+    const shipmentDetails = {
+      fromAddress,
+      toAddress,
+      weight: parseFloat(weight) || 2.0,
+      dimensions: {
+        length: parseInt(length) || 14,
+        width: parseInt(width) || 10,
+        height: parseInt(height) || 5
+      }
+    };
+
+    const rates = await shippingManager.getAllRates(shipmentDetails);
+    
+    // Store rates for this order
+    if (orderId) {
+      const orderIdNum = parseInt(orderId);
+      for (const rate of rates) {
+        db.prepare(`
+          INSERT INTO shipping_rates (order_id, carrier, service_code, service_name, cost, currency, transit_time, delivery_date, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          orderIdNum,
+          rate.carrier,
+          rate.service,
+          rate.serviceName,
+          rate.cost,
+          rate.currency,
+          rate.transitTime,
+          rate.deliveryDate,
+          dayjs().toISOString()
+        );
+      }
+    }
+
+    res.json(rates);
+  } catch (error) {
+    logger.error('Error getting shipping rates:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create shipment
+app.post('/admin/shipping/create', ensureAdmin, async (req, res) => {
+  try {
+    const { orderId, selectedRate, weight, length, width, height, toName, toPhone, toAddress1, toAddress2, toCity, toState, toZip } = req.body;
+    
+    const orderIdNum = parseInt(orderId);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND status = \'paid\'').get(orderIdNum);
+    
+    if (!order) {
+      return res.status(400).json({ error: 'Order not found or not paid' });
+    }
+
+    // Get product details
+    let product = null;
+    if (order.auction_id) {
+      const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
+      if (auction) {
+        product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+      }
+    } else if (order.product_id) {
+      product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+    }
+
+    if (!product) {
+      return res.status(400).json({ error: 'Product not found' });
+    }
+
+    // Parse selected rate (format: "carrier:service")
+    const [carrier, serviceCode] = selectedRate.split(':');
+
+    // Build addresses
+    const fromAddress = {
+      name: process.env.SHIP_FROM_NAME || 'Khloe\'s Kicks',
+      line1: process.env.SHIP_FROM_ADDRESS1 || '123 Sneaker Street',
+      line2: process.env.SHIP_FROM_ADDRESS2 || '',
+      city: process.env.SHIP_FROM_CITY || 'Fashion City',
+      state: process.env.SHIP_FROM_STATE || 'CA',
+      zip: process.env.SHIP_FROM_ZIP || '90210',
+      country: process.env.SHIP_FROM_COUNTRY || 'US',
+      phone: process.env.SHIP_FROM_PHONE || '5551234567'
+    };
+
+    const toAddress = {
+      name: toName,
+      line1: toAddress1,
+      line2: toAddress2,
+      city: toCity,
+      state: toState,
+      zip: toZip,
+      country: 'US',
+      phone: toPhone || '5551234567'
+    };
+
+    const shipmentDetails = {
+      fromAddress,
+      toAddress,
+      weight: parseFloat(weight) || 2.0,
+      dimensions: {
+        length: parseInt(length) || 14,
+        width: parseInt(width) || 10,
+        height: parseInt(height) || 5
+      },
+      serviceCode,
+      serviceType: serviceCode,
+      value: order.amount / 100,
+      itemDescription: `${product.brand} ${product.name}`
+    };
+
+    // Create shipping label
+    const labelResult = await shippingManager.createShippingLabel(carrier, shipmentDetails);
+    
+    // Create shipment record
+    const shipmentId = db.prepare(`
+      INSERT INTO shipments (
+        order_id, carrier, service_code, service_name, tracking_number, 
+        shipping_cost, weight, status, to_name, to_address1, to_address2, 
+        to_city, to_state, to_zip, to_country, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      orderIdNum,
+      labelResult.carrier,
+      serviceCode,
+      serviceCode, // Will be updated with proper name
+      labelResult.trackingNumber,
+      labelResult.cost,
+      parseFloat(weight) || 2.0,
+      'created',
+      toName,
+      toAddress1,
+      toAddress2 || null,
+      toCity,
+      toState,
+      toZip,
+      'US',
+      dayjs().toISOString(),
+      dayjs().toISOString()
+    ).lastInsertRowid;
+
+    // Store shipping label
+    if (labelResult.labelUrl) {
+      db.prepare(`
+        INSERT INTO shipping_labels (shipment_id, carrier, label_url, label_format, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        shipmentId,
+        labelResult.carrier,
+        labelResult.labelUrl,
+        'PDF',
+        dayjs().toISOString()
+      );
+    }
+
+    // Store shipping address
+    db.prepare(`
+      INSERT INTO shipping_addresses (
+        order_id, type, name, address_line1, address_line2, 
+        city, state, postal_code, country, phone, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      orderIdNum,
+      'to',
+      toName,
+      toAddress1,
+      toAddress2 || null,
+      toCity,
+      toState,
+      toZip,
+      'US',
+      toPhone || null,
+      dayjs().toISOString()
+    );
+
+    logger.info('Shipment created successfully', {
+      orderId: orderIdNum,
+      shipmentId,
+      carrier: labelResult.carrier,
+      trackingNumber: labelResult.trackingNumber
+    });
+
+    res.json({ success: true, shipmentId, trackingNumber: labelResult.trackingNumber });
+  } catch (error) {
+    logger.error('Error creating shipment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test carrier connection
+app.post('/admin/shipping/test/:carrier', ensureAdmin, async (req, res) => {
+  try {
+    const { carrier } = req.params;
+    const service = shippingManager.getCarrierService(carrier);
+    
+    if (!service) {
+      return res.json({ success: false, error: 'Carrier not configured' });
+    }
+
+    // Test authentication
+    await service.authenticate();
+    res.json({ success: true, message: `${carrier.toUpperCase()} connection successful` });
+  } catch (error) {
+    logger.error(`Error testing ${req.params.carrier}:`, error);
+    res.json({ success: false, error: error.message });
+  }
+});
+
+// Refresh tracking information
+app.post('/admin/shipping/tracking/:shipmentId/refresh', ensureAdmin, async (req, res) => {
+  try {
+    const shipmentId = parseInt(req.params.shipmentId);
+    const shipment = db.prepare('SELECT * FROM shipments WHERE id = ?').get(shipmentId);
+    
+    if (!shipment) {
+      return res.status(404).json({ error: 'Shipment not found' });
+    }
+
+    if (!shipment.tracking_number) {
+      return res.status(400).json({ error: 'No tracking number available' });
+    }
+
+    // Get tracking information
+    const trackingInfo = await shippingManager.trackPackage(shipment.carrier, shipment.tracking_number);
+    
+    // Update shipment status
+    db.prepare(`
+      UPDATE shipments 
+      SET status = ?, estimated_delivery = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      trackingInfo.status.toLowerCase(),
+      trackingInfo.estimatedDelivery,
+      dayjs().toISOString(),
+      shipmentId
+    );
+
+    // Store tracking events
+    for (const event of trackingInfo.events) {
+      // Check if event already exists
+      const existingEvent = db.prepare(`
+        SELECT id FROM tracking_events 
+        WHERE shipment_id = ? AND event_date = ? AND event_time = ? AND description = ?
+      `).get(shipmentId, event.date, event.time, event.description);
+
+      if (!existingEvent) {
+        db.prepare(`
+          INSERT INTO tracking_events (shipment_id, event_date, event_time, description, location, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          shipmentId,
+          event.date,
+          event.time || null,
+          event.description,
+          event.location || null,
+          dayjs().toISOString()
+        );
+      }
+    }
+
+    logger.info('Tracking refreshed successfully', {
+      shipmentId,
+      trackingNumber: shipment.tracking_number,
+      status: trackingInfo.status,
+      eventsCount: trackingInfo.events.length
+    });
+
+    res.json({ success: true, trackingInfo });
+  } catch (error) {
+    logger.error('Error refreshing tracking:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get order details for shipping
+app.get('/admin/shipping/order/:orderId', ensureAdmin, (req, res) => {
+  try {
+    const orderId = parseInt(req.params.orderId);
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Get shipping address if exists
+    const shippingAddress = db.prepare(`
+      SELECT * FROM shipping_addresses 
+      WHERE order_id = ? AND type = 'to' 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `).get(orderId);
+
+    res.json({ 
+      ...order, 
+      shipping_address: shippingAddress ? {
+        name: shippingAddress.name,
+        phone: shippingAddress.phone,
+        line1: shippingAddress.address_line1,
+        line2: shippingAddress.address_line2,
+        city: shippingAddress.city,
+        state: shippingAddress.state,
+        zip: shippingAddress.postal_code
+      } : null
+    });
+  } catch (error) {
+    logger.error('Error getting order details:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk shipment processing
+app.post('/admin/shipping/bulk', ensureAdmin, async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+    const results = { successful: 0, failed: 0, errors: [] };
+
+    for (const orderId of orderIds) {
+      try {
+        const orderIdNum = parseInt(orderId);
+        const order = db.prepare('SELECT * FROM orders WHERE id = ? AND status = \'paid\'').get(orderIdNum);
+        
+        if (!order) {
+          results.failed++;
+          results.errors.push(`Order ${orderId}: Not found or not paid`);
+          continue;
+        }
+
+        // Check if shipment already exists
+        const existingShipment = db.prepare('SELECT id FROM shipments WHERE order_id = ?').get(orderIdNum);
+        if (existingShipment) {
+          results.failed++;
+          results.errors.push(`Order ${orderId}: Shipment already exists`);
+          continue;
+        }
+
+        // Get product details
+        let product = null;
+        if (order.auction_id) {
+          const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
+          if (auction) {
+            product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+          }
+        } else if (order.product_id) {
+          product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+        }
+
+        if (!product) {
+          results.failed++;
+          results.errors.push(`Order ${orderId}: Product not found`);
+          continue;
+        }
+
+        // Use default shipping address or skip if not available
+        const shippingAddress = db.prepare(`
+          SELECT * FROM shipping_addresses 
+          WHERE order_id = ? AND type = 'to' 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `).get(orderIdNum);
+
+        if (!shippingAddress) {
+          results.failed++;
+          results.errors.push(`Order ${orderId}: No shipping address`);
+          continue;
+        }
+
+        // Build shipment details with defaults
+        const fromAddress = {
+          name: process.env.SHIP_FROM_NAME || 'Khloe\'s Kicks',
+          line1: process.env.SHIP_FROM_ADDRESS1 || '123 Sneaker Street',
+          line2: process.env.SHIP_FROM_ADDRESS2 || '',
+          city: process.env.SHIP_FROM_CITY || 'Fashion City',
+          state: process.env.SHIP_FROM_STATE || 'CA',
+          zip: process.env.SHIP_FROM_ZIP || '90210',
+          country: process.env.SHIP_FROM_COUNTRY || 'US',
+          phone: process.env.SHIP_FROM_PHONE || '5551234567'
+        };
+
+        const toAddress = {
+          name: shippingAddress.name,
+          line1: shippingAddress.address_line1,
+          line2: shippingAddress.address_line2,
+          city: shippingAddress.city,
+          state: shippingAddress.state,
+          zip: shippingAddress.postal_code,
+          country: shippingAddress.country || 'US',
+          phone: shippingAddress.phone || '5551234567'
+        };
+
+        const shipmentDetails = shippingManager.buildShipmentDetails(
+          order, product, fromAddress, toAddress
+        );
+
+        // Use optimal shipment creation
+        const labelResult = await shippingManager.createOptimalShipment(shipmentDetails);
+        
+        // Create shipment record
+        const shipmentId = db.prepare(`
+          INSERT INTO shipments (
+            order_id, carrier, service_code, tracking_number, 
+            shipping_cost, weight, status, to_name, to_address1, to_address2, 
+            to_city, to_state, to_zip, to_country, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          orderIdNum,
+          labelResult.carrier,
+          'AUTO',
+          labelResult.trackingNumber,
+          labelResult.cost,
+          shipmentDetails.weight,
+          'created',
+          toAddress.name,
+          toAddress.line1,
+          toAddress.line2 || null,
+          toAddress.city,
+          toAddress.state,
+          toAddress.zip,
+          toAddress.country,
+          dayjs().toISOString(),
+          dayjs().toISOString()
+        ).lastInsertRowid;
+
+        // Store shipping label if available
+        if (labelResult.labelUrl) {
+          db.prepare(`
+            INSERT INTO shipping_labels (shipment_id, carrier, label_url, label_format, created_at)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(
+            shipmentId,
+            labelResult.carrier,
+            labelResult.labelUrl,
+            'PDF',
+            dayjs().toISOString()
+          );
+        }
+
+        results.successful++;
+        
+        logger.info('Bulk shipment created', {
+          orderId: orderIdNum,
+          shipmentId,
+          carrier: labelResult.carrier,
+          trackingNumber: labelResult.trackingNumber
+        });
+
+      } catch (error) {
+        results.failed++;
+        results.errors.push(`Order ${orderId}: ${error.message}`);
+        logger.error(`Bulk shipment error for order ${orderId}:`, error);
+      }
+    }
+
+    res.json(results);
+  } catch (error) {
+    logger.error('Error processing bulk shipments:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Shipment details page
+app.get('/admin/shipping/details/:shipmentId', ensureAdmin, (req, res) => {
+  try {
+    const shipmentId = parseInt(req.params.shipmentId);
+    
+    // Get shipment details
+    const shipment = db.prepare(`
+      SELECT s.*, o.id as order_id, o.amount, o.created_at as order_date,
+        u.email as buyer_email, p.name as product_name, p.brand
+      FROM shipments s
+      JOIN orders o ON o.id = s.order_id
+      JOIN users u ON u.id = o.user_id
+      LEFT JOIN auctions a ON a.id = o.auction_id
+      LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
+      WHERE s.id = ?
+    `).get(shipmentId);
+
+    if (!shipment) {
+      return res.status(404).send('Shipment not found');
+    }
+
+    // Get tracking events
+    const trackingEvents = db.prepare(`
+      SELECT * FROM tracking_events 
+      WHERE shipment_id = ? 
+      ORDER BY event_date DESC, event_time DESC
+    `).all(shipmentId);
+
+    // Get shipping labels
+    const labels = db.prepare(`
+      SELECT * FROM shipping_labels 
+      WHERE shipment_id = ? 
+      ORDER BY created_at DESC
+    `).all(shipmentId);
+
+    res.render('admin/shipment-details', {
+      user: req.session.user,
+      shipment,
+      trackingEvents,
+      labels,
+      dayjs
+    });
+  } catch (error) {
+    logger.error('Error loading shipment details:', error);
+    res.status(500).send('Error loading shipment details');
+  }
+});
+
+// ===== CUSTOMER TRACKING ROUTES =====
+
+// Public tracking page
+app.get('/track/:trackingNumber?', (req, res) => {
+  const { trackingNumber } = req.params;
+  res.render('track', { 
+    user: req.session.user,
+    trackingNumber: trackingNumber || null,
+    trackingInfo: null,
+    error: null
+  });
+});
+
+// Track package API
+app.post('/track', async (req, res) => {
+  try {
+    const { trackingNumber } = req.body;
+    
+    if (!trackingNumber) {
+      return res.render('track', {
+        user: req.session.user,
+        trackingNumber: null,
+        trackingInfo: null,
+        error: 'Please enter a tracking number'
+      });
+    }
+
+    // Find shipment by tracking number
+    const shipment = db.prepare('SELECT * FROM shipments WHERE tracking_number = ?').get(trackingNumber);
+    
+    if (!shipment) {
+      return res.render('track', {
+        user: req.session.user,
+        trackingNumber,
+        trackingInfo: null,
+        error: 'Tracking number not found'
+      });
+    }
+
+    // Get fresh tracking information
+    const trackingInfo = await shippingManager.trackPackage(shipment.carrier, trackingNumber);
+    
+    // Get order details
+    const order = db.prepare(`
+      SELECT o.*, p.name as product_name, p.brand
+      FROM orders o
+      LEFT JOIN auctions a ON a.id = o.auction_id
+      LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
+      WHERE o.id = ?
+    `).get(shipment.order_id);
+
+    // Get stored tracking events for timeline
+    const storedEvents = db.prepare(`
+      SELECT * FROM tracking_events 
+      WHERE shipment_id = ? 
+      ORDER BY event_date ASC, event_time ASC
+    `).all(shipment.id);
+
+    res.render('track', {
+      user: req.session.user,
+      trackingNumber,
+      trackingInfo: {
+        ...trackingInfo,
+        shipment,
+        order,
+        storedEvents
+      },
+      error: null,
+      dayjs
+    });
+  } catch (error) {
+    logger.error('Error tracking package:', error);
+    res.render('track', {
+      user: req.session.user,
+      trackingNumber: req.body.trackingNumber || null,
+      trackingInfo: null,
+      error: 'Error retrieving tracking information'
+    });
+  }
+});
+
+// Customer order tracking (requires login)
+app.get('/my-orders', ensureAuth, (req, res) => {
+  try {
+    const orders = db.prepare(`
+      SELECT o.*, 
+        p.name as product_name, p.brand,
+        s.tracking_number, s.carrier, s.status as shipping_status,
+        s.estimated_delivery, s.actual_delivery
+      FROM orders o
+      LEFT JOIN auctions a ON a.id = o.auction_id
+      LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
+      LEFT JOIN shipments s ON s.order_id = o.id
+      WHERE o.user_id = ?
+      ORDER BY o.created_at DESC
+    `).all(req.session.user.id);
+
+    res.render('my-orders', {
+      user: req.session.user,
+      orders,
+      dayjs
+    });
+  } catch (error) {
+    logger.error('Error loading user orders:', error);
+    res.status(500).send('Error loading orders');
   }
 });
 

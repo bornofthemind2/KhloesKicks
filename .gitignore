@@ -11,6 +11,7 @@ node_modules/
 *.sqlite-shm
 *.sqlite-wal
 data.sqlite*
+sneaker_auction.db*
 
 # Logs
 logs/

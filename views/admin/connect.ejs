@@ -1,15 +1,258 @@
-<h1>Payments</h1>
+<h1>Stripe Connect Integration</h1>
+
+<% if (success) { %>
+  <div class="alert success">✅ Stripe Connect integration successful! Your platform is now ready to process payments.</div>
+<% } %>
+<% if (disconnected) { %>
+  <div class="alert info">🔌 Stripe Connect integration has been disconnected.</div>
+<% } %>
+<% if (error === 'no_account') { %>
+  <div class="alert error">❌ Failed to connect Stripe account. Please try again.</div>
+<% } else if (error) { %>
+  <div class="alert error">❌ Stripe Connect Error: <%= error %></div>
+<% } %>
+
 <% if (!stripeClientId) { %>
-  <div class="alert error">STRIPE_CONNECT_CLIENT_ID is not set. Add it to your .env to enable onboarding.</div>
-<% } %>
-<% if (connectedId) { %>
-  <p>Connected Stripe Account: <strong><%= connectedId %></strong></p>
-  <form method="post" action="/admin/connect/disconnect">
-    <button class="btn">Disconnect</button>
-  </form>
+  <div class="alert error">STRIPE_CLIENT_ID is not configured. Add it to your .env to enable Stripe Connect onboarding.</div>
 <% } else { %>
-  <p>No connected Stripe account. Connect your own account to collect payments directly.</p>
-  <form method="post" action="/admin/connect/start">
-    <button class="btn primary" type="submit">Connect with Stripe</button>
-  </form>
+  <div class="alert info">📋 Stripe Client ID: <code><%= stripeClientId %></code></div>
 <% } %>
+
+<% if (connectedId) { %>
+  <div class="connected-account">
+    <h3>✅ Connected Stripe Account</h3>
+    <div class="account-details">
+      <p><strong>Account ID:</strong> <code><%= connectedId %></code></p>
+      <% if (accountDetails) { %>
+        <p><strong>Business Name:</strong> <%= accountDetails.displayName || 'Not provided' %></p>
+        <p><strong>Email:</strong> <%= accountDetails.email || 'Not provided' %></p>
+        <p><strong>Country:</strong> <%= accountDetails.country %></p>
+        <p><strong>Currency:</strong> <%= (accountDetails.currency || '').toUpperCase() %></p>
+        <p><strong>Account Type:</strong> <span class="badge <%= accountDetails.type === 'express' ? 'express' : 'standard' %>"><%= accountDetails.type %></span></p>
+      <% } %>
+      <% if (connectionData) { %>
+        <p><strong>Connected On:</strong> <%= new Date(connectionData.connectedAt).toLocaleDateString() %></p>
+        <p><strong>Connected By:</strong> <%= connectionData.connectedBy %></p>
+        <p><strong>Permissions:</strong> <span class="badge"><%= connectionData.scope || 'read_write' %></span></p>
+      <% } %>
+    </div>
+    
+    <div class="actions">
+      <form method="post" action="/admin/connect/disconnect" style="display: inline-block;">
+        <button class="btn danger" onclick="return confirm('Are you sure you want to disconnect this Stripe account?')">
+          🔌 Disconnect Stripe
+        </button>
+      </form>
+      
+      <a href="https://dashboard.stripe.com/connect/accounts/<%= connectedId %>" target="_blank" class="btn secondary">
+        📊 View in Stripe Dashboard
+      </a>
+    </div>
+  </div>
+  
+  <div class="integration-status">
+    <h4>Integration Status</h4>
+    <ul>
+      <li>✅ Account Connected</li>
+      <% if (accountDetails) { %>
+        <li><%= accountDetails.chargesEnabled ? '✅' : '❌' %> Charges <%= accountDetails.chargesEnabled ? 'Enabled' : 'Disabled' %></li>
+        <li><%= accountDetails.payoutsEnabled ? '✅' : '❌' %> Payouts <%= accountDetails.payoutsEnabled ? 'Enabled' : 'Disabled' %></li>
+        <li><%= accountDetails.detailsSubmitted ? '✅' : '⚠️' %> <%= accountDetails.detailsSubmitted ? 'Account Setup Complete' : 'Account Setup Required' %></li>
+      <% } else { %>
+        <li>⚠️ Unable to verify account status</li>
+      <% } %>
+      <li>✅ Webhook Integration Ready</li>
+      <li>⚠️ Test Mode (Switch to live keys for production)</li>
+    </ul>
+    
+    <div class="test-integration">
+      <button onclick="testStripeIntegration()" class="btn secondary small">
+        🧪 Test Integration
+      </button>
+      <div id="test-results" style="margin-top: 10px;"></div>
+    </div>
+  </div>
+  
+<% } else { %>
+  <div class="connection-setup">
+    <h3>🔗 Connect Your Stripe Account</h3>
+    <p>Connect your Stripe account to start collecting payments directly on your sneaker auction platform.</p>
+    
+    <div class="benefits">
+      <h4>Benefits of Stripe Connect:</h4>
+      <ul>
+        <li>💳 Accept credit cards, digital wallets, and more</li>
+        <li>🌍 Support for international payments</li>
+        <li>🔒 Secure payment processing with fraud protection</li>
+        <li>📊 Detailed transaction analytics</li>
+        <li>⚡ Fast payouts to your bank account</li>
+      </ul>
+    </div>
+    
+    <% if (stripeClientId) { %>
+      <form method="post" action="/admin/connect/start">
+        <button class="btn primary large" type="submit">
+          🚀 Connect with Stripe
+        </button>
+      </form>
+      <p class="help-text">You'll be redirected to Stripe to authorize the connection.</p>
+    <% } else { %>
+      <p class="error">Please configure your Stripe Client ID in the .env file first.</p>
+    <% } %>
+  </div>
+<% } %>
+
+<style>
+.connected-account {
+  background: #f0f9ff;
+  border: 2px solid #0ea5e9;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.account-details p {
+  margin: 8px 0;
+}
+
+.actions {
+  margin-top: 15px;
+}
+
+.actions .btn {
+  margin-right: 10px;
+  margin-bottom: 5px;
+}
+
+.connection-setup {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.benefits ul, .integration-status ul {
+  margin: 10px 0;
+  padding-left: 20px;
+}
+
+.benefits li, .integration-status li {
+  margin: 5px 0;
+}
+
+.badge {
+  background: #10b981;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.btn.large {
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.help-text {
+  color: #6b7280;
+  font-size: 14px;
+  margin-top: 10px;
+}
+
+code {
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.badge.express {
+  background: #6366f1;
+}
+
+.badge.standard {
+  background: #059669;
+}
+
+.btn.small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.test-integration {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e5e7eb;
+}
+
+#test-results {
+  font-size: 14px;
+}
+
+.test-success {
+  color: #059669;
+  background: #ecfdf5;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #10b981;
+}
+
+.test-error {
+  color: #dc2626;
+  background: #fef2f2;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ef4444;
+}
+
+.test-loading {
+  color: #6b7280;
+  font-style: italic;
+}
+</style>
+
+<script>
+async function testStripeIntegration() {
+  const resultsDiv = document.getElementById('test-results');
+  resultsDiv.innerHTML = '<div class="test-loading">🔄 Testing Stripe integration...</div>';
+  
+  try {
+    const response = await fetch('/admin/connect/test');
+    const data = await response.json();
+    
+    if (data.success) {
+      const account = data.account;
+      const integration = data.integration;
+      
+      resultsDiv.innerHTML = `
+        <div class="test-success">
+          <strong>✅ Integration Test Successful</strong><br>
+          <small>
+            Account: ${account.displayName || account.email || account.id}<br>
+            Can Process Payments: ${integration.canProcessPayments ? 'Yes' : 'No'}<br>
+            Production Ready: ${integration.readyForProduction ? 'Yes' : 'No'}
+          </small>
+        </div>
+      `;
+    } else {
+      resultsDiv.innerHTML = `
+        <div class="test-error">
+          <strong>❌ Integration Test Failed</strong><br>
+          <small>${data.error}</small>
+        </div>
+      `;
+    }
+  } catch (error) {
+    resultsDiv.innerHTML = `
+      <div class="test-error">
+        <strong>❌ Test Failed</strong><br>
+        <small>Network error: ${error.message}</small>
+      </div>
+    `;
+  }
+}
+</script>

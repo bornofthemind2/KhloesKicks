@@ -1,0 +1,811 @@
+<% title = 'Shipping Management - Admin' %>
+
+<div class="admin-shipping">
+  <div class="header-section">
+    <h1>Shipping Management</h1>
+    <div class="stats-cards">
+      <div class="stat-card">
+        <h3>Pending Shipments</h3>
+        <div class="stat-number"><%= pendingShipments.length %></div>
+      </div>
+      <div class="stat-card">
+        <h3>In Transit</h3>
+        <div class="stat-number"><%= inTransitShipments.length %></div>
+      </div>
+      <div class="stat-card">
+        <h3>Delivered Today</h3>
+        <div class="stat-number"><%= deliveredToday %></div>
+      </div>
+      <div class="stat-card">
+        <h3>Available Carriers</h3>
+        <div class="stat-number"><%= availableCarriers.length %></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Carrier Status -->
+  <div class="section">
+    <h2>Shipping Carriers</h2>
+    <div class="carriers-grid">
+      <% availableCarriers.forEach(carrier => { %>
+      <div class="carrier-card <%= carrier.configured ? 'configured' : 'not-configured' %>">
+        <h3><%= carrier.name %></h3>
+        <div class="carrier-status">
+          <span class="status-badge <%= carrier.configured ? 'active' : 'inactive' %>">
+            <%= carrier.configured ? 'Configured' : 'Not Configured' %>
+          </span>
+        </div>
+        <% if (carrier.configured) { %>
+          <button class="btn btn-small" onclick="testCarrier('<%= carrier.code %>')">Test Connection</button>
+        <% } else { %>
+          <p class="help-text">Configure API credentials in .env file</p>
+        <% } %>
+      </div>
+      <% }); %>
+    </div>
+  </div>
+
+  <!-- Pending Shipments -->
+  <div class="section">
+    <h2>Pending Shipments</h2>
+    <% if (pendingShipments.length > 0) { %>
+      <div class="actions-bar">
+        <button class="btn btn-primary" onclick="processBulkShipments()">Process Selected</button>
+        <button class="btn btn-secondary" onclick="selectAllPending()">Select All</button>
+      </div>
+      <div class="shipments-table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="selectAllCheckbox" onchange="toggleAllSelection()"></th>
+              <th>Order #</th>
+              <th>Customer</th>
+              <th>Product</th>
+              <th>Amount</th>
+              <th>Ship To</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% pendingShipments.forEach(order => { %>
+            <tr>
+              <td><input type="checkbox" class="shipment-checkbox" value="<%= order.id %>"></td>
+              <td>#<%= order.id %></td>
+              <td><%= order.buyer_email %></td>
+              <td><%= order.product_name %></td>
+              <td>$<%= (order.amount / 100).toFixed(2) %></td>
+              <td>
+                <% if (order.to_city && order.to_state) { %>
+                  <%= order.to_city %>, <%= order.to_state %>
+                <% } else { %>
+                  <span class="text-warning">Address needed</span>
+                <% } %>
+              </td>
+              <td>
+                <button class="btn btn-small btn-primary" onclick="showShipmentModal(<%= order.id %>)">
+                  Create Shipment
+                </button>
+              </td>
+            </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <div class="empty-state">
+        <p>No pending shipments to process.</p>
+      </div>
+    <% } %>
+  </div>
+
+  <!-- Active Shipments -->
+  <div class="section">
+    <h2>Active Shipments</h2>
+    <% if (activeShipments.length > 0) { %>
+      <div class="shipments-table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Order #</th>
+              <th>Tracking #</th>
+              <th>Carrier</th>
+              <th>Service</th>
+              <th>Status</th>
+              <th>Est. Delivery</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% activeShipments.forEach(shipment => { %>
+            <tr>
+              <td>#<%= shipment.order_id %></td>
+              <td>
+                <% if (shipment.tracking_number) { %>
+                  <span class="tracking-number" onclick="copyToClipboard('<%= shipment.tracking_number %>')">
+                    <%= shipment.tracking_number %>
+                  </span>
+                <% } else { %>
+                  <span class="text-muted">N/A</span>
+                <% } %>
+              </td>
+              <td><%= shipment.carrier ? shipment.carrier.toUpperCase() : 'N/A' %></td>
+              <td><%= shipment.service_name || 'Standard' %></td>
+              <td>
+                <span class="status-badge <%= shipment.status.toLowerCase().replace(' ', '-') %>">
+                  <%= shipment.status %>
+                </span>
+              </td>
+              <td><%= shipment.estimated_delivery ? dayjs(shipment.estimated_delivery).format('MMM D, YYYY') : 'TBD' %></td>
+              <td>
+                <div class="action-buttons">
+                  <% if (shipment.tracking_number) { %>
+                    <button class="btn btn-small btn-secondary" onclick="refreshTracking(<%= shipment.id %>)">
+                      Update Tracking
+                    </button>
+                  <% } %>
+                  <button class="btn btn-small" onclick="viewShipmentDetails(<%= shipment.id %>)">
+                    Details
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    <% } else { %>
+      <div class="empty-state">
+        <p>No active shipments.</p>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<!-- Create Shipment Modal -->
+<div id="shipmentModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Create Shipment</h2>
+      <button class="modal-close" onclick="closeShipmentModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="shipmentForm">
+        <input type="hidden" id="orderId" name="orderId">
+        
+        <div class="form-section">
+          <h3>Shipping Address</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Name *</label>
+              <input type="text" id="toName" name="toName" required>
+            </div>
+            <div class="form-group">
+              <label>Phone</label>
+              <input type="tel" id="toPhone" name="toPhone">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Address Line 1 *</label>
+            <input type="text" id="toAddress1" name="toAddress1" required>
+          </div>
+          <div class="form-group">
+            <label>Address Line 2</label>
+            <input type="text" id="toAddress2" name="toAddress2">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>City *</label>
+              <input type="text" id="toCity" name="toCity" required>
+            </div>
+            <div class="form-group">
+              <label>State *</label>
+              <input type="text" id="toState" name="toState" required>
+            </div>
+            <div class="form-group">
+              <label>ZIP Code *</label>
+              <input type="text" id="toZip" name="toZip" required>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Package Details</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Weight (lbs)</label>
+              <input type="number" id="weight" name="weight" value="2.0" step="0.1" min="0.1">
+            </div>
+            <div class="form-group">
+              <label>Length (in)</label>
+              <input type="number" id="length" name="length" value="14" min="1">
+            </div>
+            <div class="form-group">
+              <label>Width (in)</label>
+              <input type="number" id="width" name="width" value="10" min="1">
+            </div>
+            <div class="form-group">
+              <label>Height (in)</label>
+              <input type="number" id="height" name="height" value="5" min="1">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Shipping Options</h3>
+          <div id="ratesContainer" class="rates-container">
+            <button type="button" class="btn btn-secondary" onclick="getRates()">Get Shipping Rates</button>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeShipmentModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Shipment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<style>
+.admin-shipping {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.header-section {
+  margin-bottom: 3rem;
+}
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.stat-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.stat-card h3 {
+  margin: 0 0 1rem 0;
+  color: #666;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.stat-number {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.carriers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.carrier-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-left: 4px solid #ddd;
+}
+
+.carrier-card.configured {
+  border-left-color: #28a745;
+}
+
+.carrier-card.not-configured {
+  border-left-color: #dc3545;
+}
+
+.carrier-card h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-badge.inactive {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-badge.pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-badge.in-transit {
+  background: #cce7ff;
+  color: #004085;
+}
+
+.status-badge.delivered {
+  background: #d4edda;
+  color: #155724;
+}
+
+.section {
+  background: white;
+  margin-bottom: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.section h2 {
+  margin: 0;
+  padding: 1.5rem;
+  border-bottom: 1px solid #eee;
+  color: #333;
+}
+
+.actions-bar {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.shipments-table-container {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.table th {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #555;
+}
+
+.table tbody tr:hover {
+  background: #f8f9fa;
+}
+
+.empty-state {
+  padding: 3rem;
+  text-align: center;
+  color: #666;
+}
+
+.tracking-number {
+  cursor: pointer;
+  color: #007bff;
+  text-decoration: underline;
+}
+
+.tracking-number:hover {
+  color: #0056b3;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.btn-small {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+  background-color: white;
+  margin: 5% auto;
+  padding: 0;
+  border-radius: 8px;
+  width: 80%;
+  max-width: 800px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: #333;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #666;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.form-section {
+  margin-bottom: 2rem;
+}
+
+.form-section h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.5rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid #eee;
+}
+
+.rates-container {
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  min-height: 100px;
+}
+
+.rate-option {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rate-option:hover {
+  border-color: #007bff;
+  background: #f8f9fa;
+}
+
+.rate-option input[type="radio"] {
+  margin-right: 1rem;
+}
+
+.rate-details {
+  flex: 1;
+}
+
+.rate-name {
+  font-weight: 600;
+  color: #333;
+}
+
+.rate-info {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.rate-price {
+  font-weight: 600;
+  color: #007bff;
+  font-size: 1.1rem;
+}
+
+.text-warning {
+  color: #856404;
+}
+
+.text-muted {
+  color: #6c757d;
+}
+
+.help-text {
+  color: #666;
+  font-size: 0.8rem;
+  margin: 0.5rem 0 0 0;
+}
+
+@media (max-width: 768px) {
+  .admin-shipping {
+    padding: 1rem;
+  }
+  
+  .modal-content {
+    width: 95%;
+    margin: 2% auto;
+  }
+  
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
+  }
+}
+</style>
+
+<script>
+let selectedOrderId = null;
+
+// Modal functions
+function showShipmentModal(orderId) {
+  selectedOrderId = orderId;
+  document.getElementById('orderId').value = orderId;
+  document.getElementById('shipmentModal').style.display = 'block';
+  
+  // Load order details and prefill form if shipping address exists
+  loadOrderDetails(orderId);
+}
+
+function closeShipmentModal() {
+  document.getElementById('shipmentModal').style.display = 'none';
+  document.getElementById('shipmentForm').reset();
+  document.getElementById('ratesContainer').innerHTML = 
+    '<button type="button" class="btn btn-secondary" onclick="getRates()">Get Shipping Rates</button>';
+}
+
+// Selection functions
+function toggleAllSelection() {
+  const selectAll = document.getElementById('selectAllCheckbox');
+  const checkboxes = document.querySelectorAll('.shipment-checkbox');
+  
+  checkboxes.forEach(checkbox => {
+    checkbox.checked = selectAll.checked;
+  });
+}
+
+function selectAllPending() {
+  const checkboxes = document.querySelectorAll('.shipment-checkbox');
+  checkboxes.forEach(checkbox => {
+    checkbox.checked = true;
+  });
+  document.getElementById('selectAllCheckbox').checked = true;
+}
+
+// Utility functions
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    // Show a temporary notification
+    const notification = document.createElement('div');
+    notification.textContent = 'Tracking number copied!';
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #28a745;
+      color: white;
+      padding: 0.75rem 1rem;
+      border-radius: 4px;
+      z-index: 9999;
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      document.body.removeChild(notification);
+    }, 2000);
+  });
+}
+
+// API functions
+async function loadOrderDetails(orderId) {
+  try {
+    const response = await fetch(`/admin/shipping/order/${orderId}`);
+    const order = await response.json();
+    
+    if (order.shipping_address) {
+      document.getElementById('toName').value = order.shipping_address.name || '';
+      document.getElementById('toPhone').value = order.shipping_address.phone || '';
+      document.getElementById('toAddress1').value = order.shipping_address.line1 || '';
+      document.getElementById('toAddress2').value = order.shipping_address.line2 || '';
+      document.getElementById('toCity').value = order.shipping_address.city || '';
+      document.getElementById('toState').value = order.shipping_address.state || '';
+      document.getElementById('toZip').value = order.shipping_address.zip || '';
+    }
+  } catch (error) {
+    console.error('Error loading order details:', error);
+  }
+}
+
+async function getRates() {
+  const formData = new FormData(document.getElementById('shipmentForm'));
+  const ratesContainer = document.getElementById('ratesContainer');
+  
+  ratesContainer.innerHTML = '<div class="loading">Getting rates...</div>';
+  
+  try {
+    const response = await fetch('/admin/shipping/rates', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const rates = await response.json();
+    
+    if (rates.length === 0) {
+      ratesContainer.innerHTML = '<div class="error">No rates available</div>';
+      return;
+    }
+    
+    let html = '';
+    rates.forEach((rate, index) => {
+      html += `
+        <div class="rate-option">
+          <input type="radio" name="selectedRate" value="${rate.carrier}:${rate.service}" ${index === 0 ? 'checked' : ''} required>
+          <div class="rate-details">
+            <div class="rate-name">${rate.serviceName}</div>
+            <div class="rate-info">${rate.carrier.toUpperCase()} • ${rate.transitTime} days</div>
+          </div>
+          <div class="rate-price">$${rate.cost.toFixed(2)}</div>
+        </div>
+      `;
+    });
+    
+    ratesContainer.innerHTML = html;
+  } catch (error) {
+    console.error('Error getting rates:', error);
+    ratesContainer.innerHTML = '<div class="error">Error getting rates</div>';
+  }
+}
+
+async function testCarrier(carrier) {
+  try {
+    const response = await fetch(`/admin/shipping/test/${carrier}`, { method: 'POST' });
+    const result = await response.json();
+    
+    alert(result.success ? `${carrier.toUpperCase()} connection successful!` : `${carrier.toUpperCase()} connection failed: ${result.error}`);
+  } catch (error) {
+    alert(`Error testing ${carrier.toUpperCase()}: ${error.message}`);
+  }
+}
+
+async function refreshTracking(shipmentId) {
+  try {
+    const response = await fetch(`/admin/shipping/tracking/${shipmentId}/refresh`, { method: 'POST' });
+    const result = await response.json();
+    
+    if (result.success) {
+      location.reload();
+    } else {
+      alert('Error updating tracking: ' + result.error);
+    }
+  } catch (error) {
+    alert('Error updating tracking: ' + error.message);
+  }
+}
+
+function viewShipmentDetails(shipmentId) {
+  window.open(`/admin/shipping/details/${shipmentId}`, '_blank');
+}
+
+async function processBulkShipments() {
+  const selected = Array.from(document.querySelectorAll('.shipment-checkbox:checked')).map(cb => cb.value);
+  
+  if (selected.length === 0) {
+    alert('Please select at least one shipment to process');
+    return;
+  }
+  
+  if (!confirm(`Process ${selected.length} shipments with default settings?`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch('/admin/shipping/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderIds: selected })
+    });
+    
+    const result = await response.json();
+    alert(`Processed ${result.successful} shipments successfully. ${result.failed} failed.`);
+    location.reload();
+  } catch (error) {
+    alert('Error processing bulk shipments: ' + error.message);
+  }
+}
+
+// Form submission
+document.getElementById('shipmentForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const formData = new FormData(e.target);
+  
+  try {
+    const response = await fetch('/admin/shipping/create', {
+      method: 'POST',
+      body: formData
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      alert('Shipment created successfully!');
+      closeShipmentModal();
+      location.reload();
+    } else {
+      alert('Error creating shipment: ' + result.error);
+    }
+  } catch (error) {
+    alert('Error creating shipment: ' + error.message);
+  }
+});
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+  const modal = document.getElementById('shipmentModal');
+  if (event.target === modal) {
+    closeShipmentModal();
+  }
+}
+</script>

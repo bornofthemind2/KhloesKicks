@@ -1,0 +1,341 @@
+<% title = 'Payment Canceled - Khloes Kicks' %>
+
+<div class="order-cancellation">
+  <div class="cancel-icon">
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#dc3545" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="m15 9-6 6"/>
+      <path d="m9 9 6 6"/>
+    </svg>
+  </div>
+  
+  <h1>Payment Canceled</h1>
+  <p class="subtitle">No worries! Your payment was not processed and no charges were made.</p>
+  
+  <% if (order && product) { %>
+  <div class="order-info">
+    <h3>Item Details</h3>
+    <div class="item-details">
+      <div class="item-row">
+        <span class="label">Item:</span>
+        <span class="value"><%= product.brand %> <%= product.name %></span>
+      </div>
+      
+      <% if (product.size) { %>
+      <div class="item-row">
+        <span class="label">Size:</span>
+        <span class="value"><%= product.size %></span>
+      </div>
+      <% } %>
+      
+      <div class="item-row">
+        <span class="label">Price:</span>
+        <span class="value">$<%= (order.amount / 100).toFixed(2) %></span>
+      </div>
+      
+      <div class="item-row">
+        <span class="label">Type:</span>
+        <span class="value">
+          <% if (order.order_type === 'auction') { %>
+            Auction Win
+          <% } else { %>
+            Buy It Now
+          <% } %>
+        </span>
+      </div>
+    </div>
+  </div>
+  <% } %>
+  
+  <div class="options">
+    <h3>What would you like to do?</h3>
+    
+    <div class="option-cards">
+      <% if (order && (order.auction_id || order.product_id)) { %>
+      <div class="option-card">
+        <h4>Try Again</h4>
+        <p>Ready to complete your purchase? You can try the payment process again.</p>
+        <% if (order.auction_id) { %>
+        <a href="/auction/<%= order.auction_id %>" class="btn btn-primary">Back to Auction</a>
+        <% } else if (order.product_id) { %>
+        <a href="/" class="btn btn-primary">Browse Products</a>
+        <% } %>
+      </div>
+      <% } %>
+      
+      <div class="option-card">
+        <h4>Browse More Items</h4>
+        <p>Check out our other premium sneakers and find something else you love.</p>
+        <a href="/" class="btn btn-secondary">View All Auctions</a>
+      </div>
+      
+      <div class="option-card">
+        <h4>Need Help?</h4>
+        <p>Having trouble with payment? Our team is here to assist you.</p>
+        <a href="mailto:support@khloeskicks.com" class="btn btn-outline">Contact Support</a>
+      </div>
+    </div>
+  </div>
+  
+  <div class="payment-info">
+    <h3>Payment Information</h3>
+    <ul>
+      <li><strong>No charges were made</strong> to your payment method</li>
+      <li>Your payment information was not stored</li>
+      <li>You can safely try again with the same or different payment method</li>
+      <li>All payment processing is secured by Stripe</li>
+    </ul>
+  </div>
+  
+  <div class="help-section">
+    <h3>Common Reasons for Payment Cancellation</h3>
+    <div class="help-grid">
+      <div class="help-item">
+        <strong>Changed Your Mind</strong>
+        <p>No problem! Take your time to decide.</p>
+      </div>
+      <div class="help-item">
+        <strong>Payment Issues</strong>
+        <p>Check your card details or try a different payment method.</p>
+      </div>
+      <div class="help-item">
+        <strong>Browser Problems</strong>
+        <p>Try refreshing or using a different browser.</p>
+      </div>
+      <div class="help-item">
+        <strong>Security Concerns</strong>
+        <p>All payments are processed securely through Stripe.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.order-cancellation {
+  max-width: 700px;
+  margin: 2rem auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.cancel-icon {
+  margin-bottom: 1.5rem;
+}
+
+.order-cancellation h1 {
+  color: #dc3545;
+  margin-bottom: 1rem;
+  font-size: 2rem;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: #666;
+  margin-bottom: 2rem;
+}
+
+.order-info {
+  background: #f8f9fa;
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.order-info h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #333;
+  text-align: center;
+}
+
+.item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.item-row:last-child {
+  border-bottom: none;
+}
+
+.item-row .label {
+  font-weight: 600;
+  color: #666;
+}
+
+.item-row .value {
+  color: #333;
+}
+
+.options {
+  margin: 3rem 0;
+}
+
+.options h3 {
+  margin-bottom: 2rem;
+  color: #333;
+}
+
+.option-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.option-card {
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  transition: box-shadow 0.2s;
+}
+
+.option-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.option-card h4 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #333;
+}
+
+.option-card p {
+  color: #666;
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  background: #007bff;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #0056b3;
+  color: white;
+  text-decoration: none;
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #545b62;
+  color: white;
+  text-decoration: none;
+}
+
+.btn-outline {
+  background: transparent;
+  color: #007bff;
+  border-color: #007bff;
+}
+
+.btn-outline:hover {
+  background: #007bff;
+  color: white;
+  text-decoration: none;
+}
+
+.payment-info {
+  background: #d4edda;
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.payment-info h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #155724;
+  text-align: center;
+}
+
+.payment-info ul {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.payment-info li {
+  color: #155724;
+  margin-bottom: 0.5rem;
+}
+
+.help-section {
+  margin: 2rem 0;
+}
+
+.help-section h3 {
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  text-align: left;
+}
+
+.help-item {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 4px;
+}
+
+.help-item strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.help-item p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .order-cancellation {
+    margin: 1rem;
+    padding: 1.5rem;
+  }
+  
+  .order-cancellation h1 {
+    font-size: 1.5rem;
+  }
+  
+  .option-cards {
+    grid-template-columns: 1fr;
+  }
+  
+  .help-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .item-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+}
+</style>

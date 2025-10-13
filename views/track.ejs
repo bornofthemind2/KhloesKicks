@@ -1,0 +1,583 @@
+<% title = 'Track Your Package - Khloes Kicks' %>
+
+<div class="tracking-page">
+  <div class="header-section">
+    <h1>Track Your Package</h1>
+    <p class="subtitle">Enter your tracking number to get real-time shipping updates</p>
+  </div>
+
+  <!-- Tracking Form -->
+  <div class="tracking-form-section">
+    <form method="POST" action="/track" class="tracking-form">
+      <div class="form-group">
+        <input 
+          type="text" 
+          name="trackingNumber" 
+          placeholder="Enter tracking number" 
+          value="<%= trackingNumber || '' %>"
+          required
+          class="tracking-input"
+        >
+        <button type="submit" class="btn btn-primary tracking-btn">Track Package</button>
+      </div>
+    </form>
+
+    <% if (error) { %>
+      <div class="alert alert-error">
+        <strong>Error:</strong> <%= error %>
+      </div>
+    <% } %>
+  </div>
+
+  <!-- Tracking Results -->
+  <% if (trackingInfo) { %>
+    <div class="tracking-results">
+      <!-- Order Summary -->
+      <div class="order-summary-card">
+        <h2>Package Details</h2>
+        <div class="order-details">
+          <% if (trackingInfo.order) { %>
+            <div class="detail-row">
+              <span class="label">Order:</span>
+              <span class="value">#<%= trackingInfo.order.id %></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Item:</span>
+              <span class="value"><%= trackingInfo.order.product_name ? `${trackingInfo.order.brand} ${trackingInfo.order.product_name}` : 'Sneakers' %></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Order Date:</span>
+              <span class="value"><%= dayjs(trackingInfo.order.created_at).format('MMM D, YYYY') %></span>
+            </div>
+          <% } %>
+          <div class="detail-row">
+            <span class="label">Tracking Number:</span>
+            <span class="value tracking-number-display" onclick="copyToClipboard('<%= trackingNumber %>')">
+              <%= trackingNumber %>
+              <i class="copy-icon">📋</i>
+            </span>
+          </div>
+          <div class="detail-row">
+            <span class="label">Carrier:</span>
+            <span class="value"><%= trackingInfo.carrier.toUpperCase() %></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current Status -->
+      <div class="status-card">
+        <div class="status-header">
+          <h3>Current Status</h3>
+          <div class="status-badge status-<%= trackingInfo.status.toLowerCase().replace(/[^a-z0-9]/g, '-') %>">
+            <%= trackingInfo.statusDescription %>
+          </div>
+        </div>
+        
+        <% if (trackingInfo.estimatedDelivery) { %>
+          <div class="delivery-estimate">
+            <strong>Estimated Delivery:</strong> 
+            <%= dayjs(trackingInfo.estimatedDelivery).format('dddd, MMM D, YYYY') %>
+          </div>
+        <% } %>
+
+        <% if (trackingInfo.shipment && trackingInfo.shipment.to_city && trackingInfo.shipment.to_state) { %>
+          <div class="delivery-address">
+            <strong>Delivering to:</strong> 
+            <%= trackingInfo.shipment.to_city %>, <%= trackingInfo.shipment.to_state %> <%= trackingInfo.shipment.to_zip %>
+          </div>
+        <% } %>
+      </div>
+
+      <!-- Tracking Timeline -->
+      <div class="timeline-card">
+        <h3>Tracking History</h3>
+        <div class="timeline">
+          <% 
+            const events = trackingInfo.events && trackingInfo.events.length > 0 
+              ? trackingInfo.events 
+              : trackingInfo.storedEvents || [];
+            
+            if (events.length === 0) {
+              events.push({
+                date: trackingInfo.shipment?.created_at || new Date().toISOString(),
+                description: 'Shipment created',
+                location: 'Khloe\'s Kicks'
+              });
+            }
+          %>
+          
+          <% events.forEach((event, index) => { %>
+            <div class="timeline-item <%= index === 0 ? 'current' : '' %>">
+              <div class="timeline-marker"></div>
+              <div class="timeline-content">
+                <div class="timeline-header">
+                  <span class="timeline-description"><%= event.description %></span>
+                  <span class="timeline-date">
+                    <%= dayjs(event.date || event.event_date).format('MMM D, YYYY') %>
+                    <% if (event.time || event.event_time) { %>
+                      at <%= event.time || event.event_time %>
+                    <% } %>
+                  </span>
+                </div>
+                <% if (event.location) { %>
+                  <div class="timeline-location"><%= event.location %></div>
+                <% } %>
+              </div>
+            </div>
+          <% }); %>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="tracking-actions">
+        <button onclick="refreshTracking()" class="btn btn-secondary">
+          <span class="refresh-icon">🔄</span>
+          Refresh Tracking
+        </button>
+        
+        <% if (user && trackingInfo.order && trackingInfo.order.user_id === user.id) { %>
+          <a href="/my-orders" class="btn btn-outline">View All Orders</a>
+        <% } %>
+      </div>
+    </div>
+  <% } %>
+
+  <!-- Help Section -->
+  <div class="help-section">
+    <h3>Need Help?</h3>
+    <div class="help-grid">
+      <div class="help-item">
+        <h4>Where to find your tracking number?</h4>
+        <p>Your tracking number was sent to your email after your order shipped. It's usually 10-22 characters long.</p>
+      </div>
+      <div class="help-item">
+        <h4>Tracking not updating?</h4>
+        <p>Tracking information may take 24-48 hours to appear after shipment creation.</p>
+      </div>
+      <div class="help-item">
+        <h4>Package delayed?</h4>
+        <p>Delivery delays can occur due to weather, holidays, or high shipping volumes.</p>
+      </div>
+      <div class="help-item">
+        <h4>Still have questions?</h4>
+        <p>Contact our support team at <a href="mailto:support@khloeskicks.com">support@khloeskicks.com</a></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.tracking-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.header-section {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.header-section h1 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.tracking-form-section {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.tracking-form .form-group {
+  display: flex;
+  gap: 1rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.tracking-input {
+  flex: 1;
+  padding: 1rem;
+  border: 2px solid #e1e5e9;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+
+.tracking-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.tracking-btn {
+  padding: 1rem 2rem;
+  white-space: nowrap;
+}
+
+.alert {
+  padding: 1rem;
+  border-radius: 6px;
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.alert-error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.tracking-results {
+  display: grid;
+  gap: 2rem;
+}
+
+.order-summary-card,
+.status-card,
+.timeline-card {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.order-summary-card h2,
+.status-card h3,
+.timeline-card h3 {
+  margin: 0 0 1.5rem 0;
+  color: #333;
+}
+
+.order-details {
+  display: grid;
+  gap: 1rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #f1f3f5;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-row .label {
+  font-weight: 600;
+  color: #666;
+}
+
+.detail-row .value {
+  color: #333;
+  text-align: right;
+}
+
+.tracking-number-display {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: monospace;
+  font-weight: 600;
+  color: #007bff;
+}
+
+.tracking-number-display:hover {
+  color: #0056b3;
+}
+
+.copy-icon {
+  font-size: 0.9rem;
+}
+
+.status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.status-badge {
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.status-created,
+.status-badge.status-pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-badge.status-in-transit,
+.status-badge.status-shipped {
+  background: #cce7ff;
+  color: #004085;
+}
+
+.status-badge.status-out-for-delivery {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-badge.status-delivered {
+  background: #28a745;
+  color: white;
+}
+
+.status-badge.status-exception,
+.status-badge.status-error {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.delivery-estimate,
+.delivery-address {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+  color: #495057;
+}
+
+.timeline {
+  position: relative;
+  padding-left: 2rem;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 1rem;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #e9ecef;
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 2rem;
+}
+
+.timeline-item:last-child {
+  margin-bottom: 0;
+}
+
+.timeline-marker {
+  position: absolute;
+  left: -2rem;
+  top: 0.25rem;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #6c757d;
+  border: 3px solid white;
+  box-shadow: 0 0 0 2px #e9ecef;
+}
+
+.timeline-item.current .timeline-marker {
+  background: #007bff;
+  box-shadow: 0 0 0 2px #007bff;
+}
+
+.timeline-content {
+  padding-left: 1rem;
+}
+
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.timeline-description {
+  font-weight: 600;
+  color: #333;
+  flex: 1;
+}
+
+.timeline-date {
+  color: #666;
+  font-size: 0.9rem;
+  text-align: right;
+  white-space: nowrap;
+  margin-left: 1rem;
+}
+
+.timeline-location {
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.tracking-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.refresh-icon {
+  margin-right: 0.5rem;
+}
+
+.help-section {
+  margin-top: 4rem;
+  padding: 2rem;
+  background: #f8f9fa;
+  border-radius: 12px;
+}
+
+.help-section h3 {
+  text-align: center;
+  margin-bottom: 2rem;
+  color: #333;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.help-item h4 {
+  color: #333;
+  margin-bottom: 0.75rem;
+}
+
+.help-item p {
+  color: #666;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.help-item a {
+  color: #007bff;
+  text-decoration: none;
+}
+
+.help-item a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .tracking-page {
+    padding: 1rem;
+  }
+  
+  .tracking-form .form-group {
+    flex-direction: column;
+  }
+  
+  .timeline-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .timeline-date {
+    margin-left: 0;
+    margin-top: 0.25rem;
+  }
+  
+  .detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  
+  .detail-row .value {
+    text-align: left;
+  }
+  
+  .help-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .tracking-actions {
+    flex-direction: column;
+  }
+}
+</style>
+
+<script>
+function copyToClipboard(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => {
+      showNotification('Tracking number copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      fallbackCopy(text);
+    });
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  try {
+    document.execCommand('copy');
+    showNotification('Tracking number copied!');
+  } catch (err) {
+    console.error('Fallback copy failed: ', err);
+  }
+  document.body.removeChild(textArea);
+}
+
+function showNotification(message) {
+  const notification = document.createElement('div');
+  notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #28a745;
+    color: white;
+    padding: 1rem 1.5rem;
+    border-radius: 6px;
+    z-index: 9999;
+    animation: slideIn 0.3s ease;
+  `;
+  
+  document.body.appendChild(notification);
+  
+  setTimeout(() => {
+    notification.remove();
+  }, 3000);
+}
+
+function refreshTracking() {
+  const trackingNumber = '<%= trackingNumber || "" %>';
+  if (trackingNumber) {
+    location.reload();
+  }
+}
+
+// Add slide-in animation
+const style = document.createElement('style');
+style.textContent = `
+  @keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+`;
+document.head.appendChild(style);
+</script>

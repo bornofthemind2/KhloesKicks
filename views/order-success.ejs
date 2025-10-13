@@ -1,0 +1,280 @@
+<% title = 'Order Confirmed - Khloes Kicks' %>
+
+<div class="order-confirmation">
+  <div class="success-icon">
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#28a745" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m9 12 2 2 4-4"/>
+      <circle cx="12" cy="12" r="9"/>
+    </svg>
+  </div>
+  
+  <h1>Thank You for Your Purchase!</h1>
+  
+  <div class="order-summary">
+    <h2>Order Confirmation</h2>
+    <div class="order-details">
+      <div class="detail-row">
+        <span class="label">Order Number:</span>
+        <span class="value">#<%= order.id %></span>
+      </div>
+      
+      <% if (product) { %>
+      <div class="detail-row">
+        <span class="label">Item:</span>
+        <span class="value"><%= product.brand %> <%= product.name %></span>
+      </div>
+      
+      <% if (product.size) { %>
+      <div class="detail-row">
+        <span class="label">Size:</span>
+        <span class="value"><%= product.size %></span>
+      </div>
+      <% } %>
+      
+      <% if (product.sku) { %>
+      <div class="detail-row">
+        <span class="label">SKU:</span>
+        <span class="value"><%= product.sku %></span>
+      </div>
+      <% } %>
+      <% } %>
+      
+      <div class="detail-row">
+        <span class="label">Amount Paid:</span>
+        <span class="value">$<%= (order.amount / 100).toFixed(2) %></span>
+      </div>
+      
+      <div class="detail-row">
+        <span class="label">Purchase Type:</span>
+        <span class="value">
+          <% if (order.order_type === 'auction') { %>
+            Auction Win
+          <% } else { %>
+            Buy It Now
+          <% } %>
+        </span>
+      </div>
+      
+      <div class="detail-row">
+        <span class="label">Date:</span>
+        <span class="value"><%= dayjs(order.created_at).format('MMMM D, YYYY at h:mm A') %></span>
+      </div>
+      
+      <div class="detail-row">
+        <span class="label">Payment Status:</span>
+        <span class="value status-paid">✓ Paid</span>
+      </div>
+    </div>
+  </div>
+  
+  <div class="next-steps">
+    <h3>What Happens Next?</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h4>Order Processing</h4>
+          <p>We're preparing your premium sneakers for shipment. This typically takes 1-2 business days.</p>
+        </div>
+      </div>
+      
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h4>Shipping Notification</h4>
+          <p>Once your order ships, you'll receive a tracking number via email so you can monitor its progress.</p>
+        </div>
+      </div>
+      
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h4>Delivery</h4>
+          <p>Your authentic sneakers will be delivered to the address provided during checkout.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="contact-info">
+    <h3>Questions?</h3>
+    <p>If you have any questions about your order, please don't hesitate to contact us. We're here to help!</p>
+    <p>Your order number is <strong>#<%= order.id %></strong> - please reference this in any correspondence.</p>
+  </div>
+  
+  <div class="action-buttons">
+    <a href="/" class="btn btn-primary">Continue Shopping</a>
+  </div>
+</div>
+
+<style>
+.order-confirmation {
+  max-width: 600px;
+  margin: 2rem auto;
+  padding: 2rem;
+  text-align: center;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.success-icon {
+  margin-bottom: 1.5rem;
+}
+
+.order-confirmation h1 {
+  color: #28a745;
+  margin-bottom: 2rem;
+  font-size: 2rem;
+}
+
+.order-summary {
+  background: #f8f9fa;
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.order-summary h2 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #333;
+  text-align: center;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-row .label {
+  font-weight: 600;
+  color: #666;
+}
+
+.detail-row .value {
+  color: #333;
+}
+
+.status-paid {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.next-steps {
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.next-steps h3 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.step-number {
+  background: #007bff;
+  color: white;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.step-content h4 {
+  margin: 0 0 0.5rem 0;
+  color: #333;
+}
+
+.step-content p {
+  margin: 0;
+  color: #666;
+  font-size: 0.95rem;
+}
+
+.contact-info {
+  background: #e7f3ff;
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.contact-info h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #333;
+  text-align: center;
+}
+
+.contact-info p {
+  margin: 0.5rem 0;
+  color: #555;
+}
+
+.action-buttons {
+  margin-top: 2rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  background: #007bff;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.btn:hover {
+  background: #0056b3;
+  color: white;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: #007bff;
+}
+
+@media (max-width: 768px) {
+  .order-confirmation {
+    margin: 1rem;
+    padding: 1.5rem;
+  }
+  
+  .order-confirmation h1 {
+    font-size: 1.5rem;
+  }
+  
+  .detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+}
+</style>

@@ -76,6 +76,82 @@
   </div>
 </form>
 
+<!-- Product Action Buttons -->
+<div class="action-buttons-section">
+  <h3>Product Actions</h3>
+  
+  <!-- Check if product already has an active auction -->
+  <% const existingAuction = (typeof activeAuction !== 'undefined') ? activeAuction : null; %>
+  
+  <div class="action-buttons">
+    <% if (!existingAuction) { %>
+      <!-- Create Auction Button -->
+      <div class="action-item">
+        <h4>🏷️ Create Auction</h4>
+        <p>Start a bidding auction for this product</p>
+        <button class="btn success" onclick="showCreateAuctionModal()">Start Auction</button>
+      </div>
+    <% } else { %>
+      <div class="action-item">
+        <h4>📈 Active Auction</h4>
+        <p>This product has an active auction (ID: <%= existingAuction.id %>)</p>
+        <a href="/auction/<%= existingAuction.id %>" class="btn primary">View Auction</a>
+        <button class="btn danger" onclick="confirmEndAuction(<%= existingAuction.id %>)">End Auction</button>
+      </div>
+    <% } %>
+    
+    <!-- Mark as Sold Out -->
+    <div class="action-item">
+      <h4>❌ Mark as Sold Out</h4>
+      <p>Remove this product from active listings</p>
+      <button class="btn danger" onclick="confirmSoldOut(<%= product.id %>)">Mark Sold Out</button>
+    </div>
+    
+    <!-- Stock Management -->
+    <div class="action-item">
+      <h4>📦 Stock Status</h4>
+      <p>Manage product availability</p>
+      <button class="btn secondary" onclick="toggleAvailability(<%= product.id %>)">Toggle Availability</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Auction Modal -->
+<div id="createAuctionModal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <h3>Create Auction for <%= product.brand %> <%= product.name %></h3>
+    <form id="createAuctionForm">
+      <input type="hidden" name="product_id" value="<%= product.id %>">
+      
+      <label>Starting Bid ($)</label>
+      <input type="number" name="starting_bid" value="<%= Math.floor((product.highest_market_price || 100) * 0.3) %>" min="1" step="1" required>
+      <p style="font-size: 12px; color: #666;">Suggested: 30% of market price ($<%= product.highest_market_price || 'N/A' %>)</p>
+      
+      <label>Auction Duration</label>
+      <select name="duration">
+        <option value="1">1 Day</option>
+        <option value="3">3 Days</option>
+        <option value="5">5 Days</option>
+        <option value="7" selected>7 Days</option>
+        <option value="10">10 Days</option>
+        <option value="14">14 Days</option>
+      </select>
+      
+      <label>Reserve Price (Optional)</label>
+      <input type="number" name="reserve_price" placeholder="Minimum acceptable bid" min="1" step="1">
+      <p style="font-size: 12px; color: #666;">Leave empty for no reserve price</p>
+      
+      <div class="modal-buttons">
+        <button type="button" class="btn primary" onclick="createAuction()">Create Auction</button>
+        <button type="button" class="btn secondary" onclick="closeCreateAuctionModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Overlay -->
+<div id="modalOverlay" class="modal-overlay" style="display: none;" onclick="closeCreateAuctionModal()"></div>
+
 <style>
 .form {
   max-width: 600px;
@@ -182,11 +258,191 @@
   padding: 20px;
   font-style: italic;
 }
+
+/* Product Action Buttons */
+.action-buttons-section {
+  margin-top: 40px;
+  padding: 25px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.action-buttons-section h3 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #2d3748;
+  font-size: 1.3rem;
+  border-bottom: 2px solid #cbd5e0;
+  padding-bottom: 8px;
+}
+
+.action-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.action-item {
+  background: white;
+  padding: 20px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.action-item h4 {
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  color: #2d3748;
+}
+
+.action-item p {
+  margin: 0 0 15px 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* Base button styles */
+.btn {
+  display: inline-block;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  text-align: center;
+  transition: background-color 0.2s ease;
+}
+
+.btn.primary {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.btn.primary:hover {
+  background-color: #2563eb;
+}
+
+.btn.success {
+  background-color: #10b981;
+  color: white;
+  border: none;
+}
+
+.btn.success:hover {
+  background-color: #059669;
+}
+
+.btn.danger {
+  background-color: #ef4444;
+  color: white;
+  border: none;
+}
+
+.btn.danger:hover {
+  background-color: #dc2626;
+}
+
+.btn.secondary {
+  background-color: #6b7280;
+  color: white;
+  border: none;
+}
+
+.btn.secondary:hover {
+  background-color: #4b5563;
+}
+
+/* Modal Styles */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 30px;
+  border-radius: 8px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+.modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #2d3748;
+}
+
+.modal-content label {
+  display: block;
+  margin-top: 15px;
+  margin-bottom: 5px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.modal-content input,
+.modal-content select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 25px;
+  justify-content: flex-end;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+}
+
+@media (max-width: 768px) {
+  .action-buttons {
+    grid-template-columns: 1fr;
+  }
+  
+  .modal-content {
+    margin: 20px;
+    width: calc(100% - 40px);
+  }
+}
 </style>
 
+<!-- Load external JavaScript for product actions -->
+<script src="/public/product-actions.js"></script>
+
 <script>
+// Set global product ID for external script
+window.productId = <%= product.id %>;
 const productId = <%= product.id %>;
 
+// Image management functions (keep these inline as they're specific to this page)
 async function addImage() {
   const imageUrl = document.getElementById('newImageUrl').value.trim();
   

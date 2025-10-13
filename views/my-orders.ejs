@@ -1,0 +1,606 @@
+<% title = 'My Orders - Khloes Kicks' %>
+
+<div class="my-orders-page">
+  <div class="header-section">
+    <h1>My Orders</h1>
+    <p class="subtitle">Track your purchases and shipping status</p>
+  </div>
+
+  <% if (orders && orders.length > 0) { %>
+    <div class="orders-grid">
+      <% orders.forEach(order => { %>
+        <div class="order-card">
+          <div class="order-header">
+            <div class="order-info">
+              <h3>Order #<%= order.id %></h3>
+              <p class="order-date"><%= dayjs(order.created_at).format('MMM D, YYYY') %></p>
+            </div>
+            <div class="order-status">
+              <span class="status-badge status-<%= order.status.toLowerCase() %>">
+                <%= order.status.charAt(0).toUpperCase() + order.status.slice(1) %>
+              </span>
+            </div>
+          </div>
+
+          <div class="order-details">
+            <div class="product-info">
+              <% if (order.product_name) { %>
+                <h4><%= order.brand %> <%= order.product_name %></h4>
+              <% } else { %>
+                <h4>Sneakers</h4>
+              <% } %>
+              <p class="order-type">
+                <% if (order.order_type === 'auction') { %>
+                  🏆 Auction Win
+                <% } else { %>
+                  🛒 Buy It Now
+                <% } %>
+              </p>
+            </div>
+            <div class="order-amount">
+              <span class="amount">$<%= (order.amount / 100).toFixed(2) %></span>
+            </div>
+          </div>
+
+          <!-- Shipping Information -->
+          <% if (order.status === 'paid' && order.tracking_number) { %>
+            <div class="shipping-section">
+              <div class="shipping-header">
+                <h4>📦 Shipping Information</h4>
+                <span class="shipping-status shipping-<%= order.shipping_status ? order.shipping_status.toLowerCase().replace(/[^a-z0-9]/g, '-') : 'pending' %>">
+                  <%= order.shipping_status ? order.shipping_status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Preparing' %>
+                </span>
+              </div>
+              
+              <div class="shipping-details">
+                <div class="shipping-detail">
+                  <span class="detail-label">Carrier:</span>
+                  <span class="detail-value"><%= order.carrier ? order.carrier.toUpperCase() : 'TBD' %></span>
+                </div>
+                
+                <div class="shipping-detail">
+                  <span class="detail-label">Tracking:</span>
+                  <span class="detail-value">
+                    <% if (order.tracking_number) { %>
+                      <span class="tracking-link" onclick="trackPackage('<%= order.tracking_number %>')">
+                        <%= order.tracking_number %>
+                      </span>
+                    <% } else { %>
+                      <span class="text-muted">Not yet assigned</span>
+                    <% } %>
+                  </span>
+                </div>
+                
+                <% if (order.estimated_delivery) { %>
+                  <div class="shipping-detail">
+                    <span class="detail-label">Est. Delivery:</span>
+                    <span class="detail-value">
+                      <%= dayjs(order.estimated_delivery).format('MMM D, YYYY') %>
+                    </span>
+                  </div>
+                <% } %>
+                
+                <% if (order.actual_delivery) { %>
+                  <div class="shipping-detail">
+                    <span class="detail-label">Delivered:</span>
+                    <span class="detail-value delivered">
+                      <%= dayjs(order.actual_delivery).format('MMM D, YYYY') %>
+                    </span>
+                  </div>
+                <% } %>
+              </div>
+              
+              <% if (order.tracking_number) { %>
+                <div class="shipping-actions">
+                  <button onclick="trackPackage('<%= order.tracking_number %>')" class=\"btn btn-small btn-primary\">
+                    Track Package
+                  </button>
+                </div>
+              <% } %>
+            </div>
+          <% } else if (order.status === 'paid') { %>
+            <div class="shipping-section">
+              <div class="shipping-header">
+                <h4>📦 Shipping Information</h4>
+                <span class="shipping-status shipping-preparing">Preparing</span>
+              </div>
+              <p class="shipping-message">
+                Your order is being prepared for shipment. You'll receive tracking information once it ships.
+              </p>
+            </div>
+          <% } else if (order.status === 'pending') { %>
+            <div class="payment-section">
+              <div class="payment-message">
+                <span class="payment-icon">⏳</span>
+                <div>
+                  <strong>Payment Processing</strong>
+                  <p>Your payment is being processed. This usually takes a few minutes.</p>
+                </div>
+              </div>
+            </div>
+          <% } %>
+
+          <!-- Order Actions -->
+          <div class="order-actions">
+            <% if (order.status === 'paid' && order.tracking_number) { %>
+              <a href="/track/<%= order.tracking_number %>" class="btn btn-outline" target="_blank">
+                View Tracking Details
+              </a>
+            <% } %>
+            
+            <% if (order.status === 'delivered') { %>
+              <div class="review-prompt">
+                <span class="review-icon">⭐</span>
+                <span>How was your experience? Leave a review!</span>
+              </div>
+            <% } %>
+          </div>
+        </div>
+      <% }); %>
+    </div>
+
+    <!-- Order Summary Stats -->
+    <div class="order-stats">
+      <div class="stats-grid">
+        <div class="stat-item">
+          <span class="stat-number"><%= orders.length %></span>
+          <span class="stat-label">Total Orders</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-number"><%= orders.filter(o => o.status === 'delivered' || o.shipping_status === 'delivered').length %></span>
+          <span class="stat-label">Delivered</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-number">$<%= (orders.reduce((sum, o) => sum + o.amount, 0) / 100).toFixed(2) %></span>
+          <span class="stat-label">Total Spent</span>
+        </div>
+      </div>
+    </div>
+  <% } else { %>
+    <!-- Empty State -->
+    <div class="empty-state">
+      <div class="empty-icon">📦</div>
+      <h2>No Orders Yet</h2>
+      <p>You haven't placed any orders yet. Start shopping to see your order history here!</p>
+      <a href="/" class="btn btn-primary">Browse Auctions</a>
+    </div>
+  <% } %>
+
+  <!-- Help Section -->
+  <div class="help-section">
+    <h3>Need Help?</h3>
+    <div class="help-items">
+      <div class="help-item">
+        <strong>Order Questions?</strong>
+        <p>Contact us at <a href="mailto:orders@khloeskicks.com">orders@khloeskicks.com</a></p>
+      </div>
+      <div class="help-item">
+        <strong>Shipping Issues?</strong>
+        <p>Email <a href="mailto:shipping@khloeskicks.com">shipping@khloeskicks.com</a></p>
+      </div>
+      <div class="help-item">
+        <strong>Returns & Exchanges</strong>
+        <p>Contact <a href="mailto:returns@khloeskicks.com">returns@khloeskicks.com</a></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.my-orders-page {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.header-section {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.header-section h1 {
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.orders-grid {
+  display: grid;
+  gap: 2rem;
+  margin-bottom: 3rem;
+}
+
+.order-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  transition: box-shadow 0.2s;
+}
+
+.order-card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.order-info h3 {
+  margin: 0;
+  color: #333;
+  font-size: 1.2rem;
+}
+
+.order-date {
+  margin: 0.25rem 0 0 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.status-badge {
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.status-pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-badge.status-paid {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-badge.status-delivered {
+  background: #28a745;
+  color: white;
+}
+
+.status-badge.status-cancelled {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.order-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #f1f3f5;
+}
+
+.product-info h4 {
+  margin: 0 0 0.5rem 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.order-type {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.amount {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.shipping-section {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.shipping-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.shipping-header h4 {
+  margin: 0;
+  color: #333;
+  font-size: 1rem;
+}
+
+.shipping-status {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.shipping-preparing {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.shipping-created,
+.shipping-pending {
+  background: #e2e3e5;
+  color: #495057;
+}
+
+.shipping-in-transit,
+.shipping-shipped {
+  background: #cce7ff;
+  color: #004085;
+}
+
+.shipping-out-for-delivery {
+  background: #d4edda;
+  color: #155724;
+}
+
+.shipping-delivered {
+  background: #28a745;
+  color: white;
+}
+
+.shipping-details {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.shipping-detail {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.detail-value {
+  color: #333;
+  font-weight: 600;
+}
+
+.detail-value.delivered {
+  color: #28a745;
+}
+
+.tracking-link {
+  color: #007bff;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: monospace;
+}
+
+.tracking-link:hover {
+  color: #0056b3;
+}
+
+.text-muted {
+  color: #6c757d;
+}
+
+.shipping-message {
+  color: #666;
+  margin: 0;
+  font-style: italic;
+}
+
+.shipping-actions {
+  margin-top: 1rem;
+}
+
+.payment-section {
+  background: #e7f3ff;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.payment-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.payment-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.payment-message strong {
+  color: #333;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.payment-message p {
+  margin: 0;
+  color: #666;
+}
+
+.order-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.review-prompt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.review-icon {
+  color: #ffc107;
+}
+
+.order-stats {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  margin-bottom: 3rem;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 2rem;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-number {
+  display: block;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.stat-label {
+  color: #666;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 4rem 2rem;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  margin-bottom: 3rem;
+}
+
+.empty-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.empty-state h2 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.empty-state p {
+  color: #666;
+  margin-bottom: 2rem;
+  font-size: 1.1rem;
+}
+
+.help-section {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.help-section h3 {
+  text-align: center;
+  margin-bottom: 2rem;
+  color: #333;
+}
+
+.help-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 2rem;
+}
+
+.help-item strong {
+  display: block;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.help-item p {
+  margin: 0;
+  color: #666;
+}
+
+.help-item a {
+  color: #007bff;
+  text-decoration: none;
+}
+
+.help-item a:hover {
+  text-decoration: underline;
+}
+
+.btn-small {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .my-orders-page {
+    padding: 1rem;
+  }
+  
+  .order-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .order-details {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .shipping-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .shipping-detail {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  
+  .order-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+  
+  .help-items {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<script>
+function trackPackage(trackingNumber) {
+  window.open(`/track/${trackingNumber}`, '_blank');
+}
+</script>
