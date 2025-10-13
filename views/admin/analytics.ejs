@@ -1,0 +1,461 @@
+<div class="admin-header">
+  <h1>Payment Gateway Analytics</h1>
+  <div class="admin-actions">
+    <a href="/admin/export/orders" class="btn btn-export" download>
+      📤 Export Orders CSV
+    </a>
+    <span class="date-range">Last 30 Days</span>
+  </div>
+</div>
+
+<div class="stats-row">
+  <% 
+  const totalVolume = analytics.reduce((sum, a) => sum + (a.total_volume || 0), 0);
+  const totalTransactions = analytics.reduce((sum, a) => sum + (a.total_transactions || 0), 0);
+  const avgSuccessRate = analytics.length > 0 ? analytics.reduce((sum, a) => sum + (a.avg_success_rate || 0), 0) / analytics.length : 0;
+  const totalFees = analytics.reduce((sum, a) => sum + ((a.total_volume * a.avg_fee_rate / 100) || 0), 0);
+  %>
+  <div class="stat-card">
+    <div class="stat-number">$<%= Math.round(totalVolume).toLocaleString() %></div>
+    <div class="stat-label">Total Volume</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number"><%= totalTransactions %></div>
+    <div class="stat-label">Total Transactions</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number"><%= Math.round(avgSuccessRate) %>%</div>
+    <div class="stat-label">Avg Success Rate</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-number">$<%= Math.round(totalFees).toLocaleString() %></div>
+    <div class="stat-label">Total Fees Paid</div>
+  </div>
+</div>
+
+<div class="analytics-grid">
+  <!-- Gateway Comparison -->
+  <div class="analytics-card">
+    <h2>Gateway Performance Comparison</h2>
+    <div class="gateway-comparison">
+      <% analytics.forEach(gateway => { %>
+        <div class="gateway-row">
+          <div class="gateway-info">
+            <div class="gateway-name">
+              <span class="gateway-icon <%= gateway.gateway_name %>">
+                <% if (gateway.gateway_name === 'stripe') { %>💳<% } %>
+                <% if (gateway.gateway_name === 'razorpay') { %>💎<% } %>
+                <% if (gateway.gateway_name === 'paypal') { %>🅿️<% } %>
+                <% if (gateway.gateway_name === 'square') { %>⬜<% } %>
+              </span>
+              <%= gateway.gateway_name.charAt(0).toUpperCase() + gateway.gateway_name.slice(1) %>
+            </div>
+            <div class="gateway-stats">
+              <span class="volume">$<%= Math.round(gateway.total_volume || 0).toLocaleString() %></span>
+              <span class="transactions"><%= gateway.total_transactions || 0 %> txns</span>
+              <span class="success-rate <%= gateway.avg_success_rate >= 95 ? 'high' : gateway.avg_success_rate >= 85 ? 'medium' : 'low' %>">
+                <%= Math.round(gateway.avg_success_rate || 0) %>% success
+              </span>
+              <span class="fee-rate">
+                <%= (gateway.avg_fee_rate || 0).toFixed(2) %>% avg fee
+              </span>
+            </div>
+          </div>
+          <div class="gateway-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: <%= Math.min(100, (gateway.total_volume / Math.max(totalVolume, 1)) * 100) %>%"></div>
+            </div>
+          </div>
+        </div>
+      <% }); %>
+      
+      <% if (analytics.length === 0) { %>
+        <div class="no-data">
+          <p>No payment data available yet.</p>
+          <p>Complete some transactions to see analytics here.</p>
+        </div>
+      <% } %>
+    </div>
+  </div>
+
+  <!-- Recent Transactions -->
+  <div class="analytics-card">
+    <h2>Recent Transactions</h2>
+    <div class="transactions-list">
+      <% if (recentOrders.length > 0) { %>
+        <% recentOrders.slice(0, 10).forEach(order => { %>
+          <div class="transaction-row">
+            <div class="transaction-info">
+              <div class="transaction-gateway">
+                <span class="gateway-badge <%= order.payment_gateway %>">
+                  <%= order.payment_gateway || 'stripe' %>
+                </span>
+              </div>
+              <div class="transaction-details">
+                <div class="transaction-product">
+                  <%= order.brand %> <%= order.product_name %>
+                </div>
+                <div class="transaction-user">
+                  <%= order.user_email %>
+                </div>
+              </div>
+              <div class="transaction-amount">
+                <div class="amount">$<%= order.amount %></div>
+                <% if (order.gateway_fees > 0) { %>
+                  <div class="fees">-$<%= order.gateway_fees.toFixed(2) %> fees</div>
+                <% } %>
+              </div>
+              <div class="transaction-status">
+                <span class="status-badge <%= order.status %>"><%= order.status %></span>
+                <div class="transaction-date">
+                  <%= dayjs(order.created_at).format('MMM DD, HH:mm') %>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% }); %>
+      <% } else { %>
+        <div class="no-data">
+          <p>No recent transactions.</p>
+        </div>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<!-- Gateway Recommendations -->
+<div class="analytics-card recommendations">
+  <h2>💡 Gateway Optimization Recommendations</h2>
+  <div class="recommendations-list">
+    <% 
+    const stripeGateway = analytics.find(g => g.gateway_name === 'stripe');
+    const razorpayGateway = analytics.find(g => g.gateway_name === 'razorpay');
+    %>
+    
+    <div class="recommendation">
+      <div class="rec-icon">💰</div>
+      <div class="rec-content">
+        <h3>Cost Optimization</h3>
+        <% if (!razorpayGateway && stripeGateway) { %>
+          <p>Consider using <strong>Razorpay</strong> for international customers - it offers 2% fees (vs Stripe's 2.9%) and cryptocurrency support.</p>
+        <% } else if (razorpayGateway && razorpayGateway.avg_fee_rate < 2.5) { %>
+          <p>Great job! Razorpay is saving you ~30% on payment processing fees compared to traditional gateways.</p>
+        <% } else { %>
+          <p>Your payment processing costs are optimized. Consider volume discounts for higher transaction amounts.</p>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="recommendation">
+      <div class="rec-icon">🌍</div>
+      <div class="rec-content">
+        <h3>Global Expansion</h3>
+        <p>Add more payment methods like <strong>Apple Pay</strong>, <strong>Google Pay</strong>, and regional wallets to increase conversion rates by 15-25%.</p>
+      </div>
+    </div>
+
+    <div class="recommendation">
+      <div class="rec-icon">📊</div>
+      <div class="rec-content">
+        <h3>Performance Monitoring</h3>
+        <p>Success rates above 95% are excellent. Monitor decline rates and consider smart routing for failed transactions.</p>
+      </div>
+    </div>
+
+    <div class="recommendation">
+      <div class="rec-icon">🔮</div>
+      <div class="rec-content">
+        <h3>Future-Proof Payments</h3>
+        <p>Cryptocurrency adoption is growing among sneaker enthusiasts. Your Razorpay integration supports crypto payments!</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+/* Admin Header */
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding: 20px 0;
+  border-bottom: 2px solid #e2e8f0;
+}
+.admin-header h1 {
+  margin: 0;
+  color: #1a202c;
+  font-size: 2rem;
+}
+.admin-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.date-range {
+  background: #667eea;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Export Button */
+.btn-export {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+/* Stats Row */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+.stat-card {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  text-align: center;
+  border: 1px solid #e2e8f0;
+  transition: all 0.3s ease;
+}
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.stat-number {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #667eea;
+  margin-bottom: 8px;
+}
+.stat-label {
+  font-size: 14px;
+  color: #64748b;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Analytics Grid */
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  margin-bottom: 30px;
+}
+
+.analytics-card {
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  border: 1px solid #e2e8f0;
+}
+
+.analytics-card h2 {
+  margin: 0 0 20px;
+  color: #1a202c;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+/* Gateway Comparison */
+.gateway-row {
+  display: flex;
+  align-items: center;
+  padding: 15px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.gateway-row:last-child {
+  border-bottom: none;
+}
+
+.gateway-info {
+  flex: 1;
+}
+
+.gateway-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: capitalize;
+}
+
+.gateway-icon {
+  font-size: 18px;
+}
+
+.gateway-stats {
+  display: flex;
+  gap: 15px;
+  font-size: 12px;
+}
+
+.volume {
+  font-weight: 600;
+  color: #059669;
+}
+
+.success-rate.high { color: #059669; }
+.success-rate.medium { color: #d97706; }
+.success-rate.low { color: #dc2626; }
+
+.gateway-progress {
+  width: 150px;
+  margin-left: 20px;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  transition: width 0.3s ease;
+}
+
+/* Transactions */
+.transaction-row {
+  padding: 15px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.transaction-info {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 15px;
+  align-items: center;
+}
+
+.gateway-badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.gateway-badge.stripe { background: #635bff; color: white; }
+.gateway-badge.razorpay { background: #3395ff; color: white; }
+.gateway-badge.paypal { background: #0070ba; color: white; }
+
+.transaction-product {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.transaction-user {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.amount {
+  font-weight: 600;
+  text-align: right;
+}
+
+.fees {
+  font-size: 11px;
+  color: #dc2626;
+  text-align: right;
+}
+
+.status-badge {
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.paid { background: #d1fae5; color: #065f46; }
+.status-badge.pending { background: #fef3c7; color: #92400e; }
+
+.transaction-date {
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* Recommendations */
+.recommendations {
+  grid-column: 1 / -1;
+}
+
+.recommendations-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.recommendation {
+  display: flex;
+  gap: 15px;
+  padding: 20px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border-left: 4px solid #667eea;
+}
+
+.rec-icon {
+  font-size: 24px;
+}
+
+.rec-content h3 {
+  margin: 0 0 8px;
+  color: #1a202c;
+  font-size: 16px;
+}
+
+.rec-content p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.no-data {
+  text-align: center;
+  padding: 40px;
+  color: #64748b;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .gateway-stats {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .transaction-info {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .recommendations-list {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

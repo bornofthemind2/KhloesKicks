@@ -18,6 +18,7 @@ import rateLimit from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
 import winston from 'winston';
 import cors from 'cors';
+import Razorpay from 'razorpay';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_secret';
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+
+// Initialize Razorpay
+const razorpay = (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) 
+  ? new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET
+    })
+  : null;
 
 // Configure Winston logger
 const logger = winston.createLogger({
@@ -185,9 +194,38 @@ try {
 try {
   db.exec('ALTER TABLE orders ADD COLUMN product_id INTEGER');
   db.exec('ALTER TABLE orders ADD COLUMN order_type TEXT DEFAULT \'auction\'');
-  console.log('Added product_id and order_type columns to orders table');
+  logger.info('Added product_id and order_type columns to orders table');
 } catch (e) {
   // Columns already exist, ignore error
+}
+
+// Add payment gateway columns to orders if they don't exist (migration)
+try {
+  db.exec('ALTER TABLE orders ADD COLUMN payment_gateway TEXT DEFAULT \'stripe\'');
+  db.exec('ALTER TABLE orders ADD COLUMN gateway_transaction_id TEXT');
+  db.exec('ALTER TABLE orders ADD COLUMN gateway_fees DECIMAL(10,2)');
+  logger.info('Added payment gateway columns to orders table');
+} catch (e) {
+  // Columns already exist, ignore error
+}
+
+// Create gateway analytics table if it doesn't exist
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS gateway_analytics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gateway_name TEXT NOT NULL,
+      transaction_count INTEGER DEFAULT 0,
+      success_rate DECIMAL(5,2) DEFAULT 0,
+      average_fee DECIMAL(5,2) DEFAULT 0,
+      total_volume DECIMAL(15,2) DEFAULT 0,
+      date DATE NOT NULL,
+      UNIQUE(gateway_name, date)
+    );
+  `);
+  logger.info('Gateway analytics table created');
+} catch (e) {
+  logger.error('Failed to create gateway analytics table:', e.message);
 }
 
 // Create performance indexes
@@ -565,6 +603,170 @@ app.get('/order/:id/cancel', ensureAuth, (req, res) => {
   res.send('Payment canceled.');
 });
 
+// Razorpay order creation
+app.post('/payment/razorpay/create-order', ensureAuth, async (req, res) => {
+  if (!razorpay) {
+    return res.status(500).json({ error: 'Razorpay not configured' });
+  }
+
+  try {
+    const { amount, currency = 'USD', auctionId, productId } = req.body;
+    const userId = req.session.user.id;
+
+    // Validate amount
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+
+    // Create Razorpay order
+    const razorpayOrder = await razorpay.orders.create({
+      amount: Math.round(amount * 100), // Convert to smallest currency unit
+      currency: currency,
+      receipt: `receipt_${Date.now()}_${userId}`,
+      payment_capture: 1,
+      notes: {
+        auction_id: auctionId,
+        product_id: productId,
+        user_id: userId
+      }
+    });
+
+    // Create pending order in database
+    const orderId = db.prepare(
+      'INSERT INTO orders (auction_id, product_id, user_id, amount, order_type, status, payment_gateway, gateway_transaction_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      auctionId || null,
+      productId || null,
+      userId,
+      amount,
+      auctionId ? 'auction' : 'buy_now',
+      'pending',
+      'razorpay',
+      razorpayOrder.id,
+      new Date().toISOString()
+    ).lastInsertRowid;
+
+    logger.info('Razorpay order created', {
+      orderId,
+      razorpayOrderId: razorpayOrder.id,
+      amount,
+      user: req.session.user.email
+    });
+
+    res.json({
+      success: true,
+      orderId,
+      razorpayOrder: {
+        id: razorpayOrder.id,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency
+      }
+    });
+  } catch (error) {
+    logger.error('Razorpay order creation failed', {
+      error: error.message,
+      user: req.session.user.email
+    });
+    res.status(500).json({ error: 'Failed to create payment order' });
+  }
+});
+
+// Razorpay payment verification
+app.post('/payment/razorpay/verify', ensureAuth, async (req, res) => {
+  if (!razorpay) {
+    return res.status(500).json({ error: 'Razorpay not configured' });
+  }
+
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    // Verify payment signature
+    const crypto = await import('crypto');
+    const expectedSignature = crypto.default
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+      logger.warn('Razorpay signature verification failed', {
+        expected: expectedSignature,
+        received: razorpay_signature,
+        user: req.session.user.email
+      });
+      return res.status(400).json({ error: 'Payment verification failed' });
+    }
+
+    // Update order status
+    const order = db.prepare('SELECT * FROM orders WHERE gateway_transaction_id = ? AND user_id = ?')
+      .get(razorpay_order_id, req.session.user.id);
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Fetch payment details from Razorpay
+    const payment = await razorpay.payments.fetch(razorpay_payment_id);
+    const fees = payment.fee ? payment.fee / 100 : 0; // Convert from paise to currency
+
+    // Update order with payment confirmation
+    db.prepare(
+      'UPDATE orders SET status = ?, gateway_transaction_id = ?, gateway_fees = ? WHERE id = ?'
+    ).run('paid', razorpay_payment_id, fees, order.id);
+
+    // Update gateway analytics
+    updateGatewayAnalytics('razorpay', order.amount, fees, true);
+
+    logger.info('Razorpay payment verified', {
+      orderId: order.id,
+      paymentId: razorpay_payment_id,
+      amount: order.amount,
+      fees,
+      user: req.session.user.email
+    });
+
+    res.json({ success: true, orderId: order.id });
+  } catch (error) {
+    logger.error('Razorpay payment verification failed', {
+      error: error.message,
+      user: req.session.user.email
+    });
+    res.status(500).json({ error: 'Payment verification failed' });
+  }
+});
+
+// Gateway analytics helper function
+function updateGatewayAnalytics(gatewayName, amount, fees, success) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get existing analytics for today
+    const existing = db.prepare(
+      'SELECT * FROM gateway_analytics WHERE gateway_name = ? AND date = ?'
+    ).get(gatewayName, today);
+
+    if (existing) {
+      // Update existing record
+      const newCount = existing.transaction_count + 1;
+      const newVolume = existing.total_volume + amount;
+      const newSuccessRate = success 
+        ? ((existing.success_rate * existing.transaction_count) + 100) / newCount
+        : (existing.success_rate * existing.transaction_count) / newCount;
+      const newAvgFee = ((existing.average_fee * existing.transaction_count) + fees) / newCount;
+
+      db.prepare(
+        'UPDATE gateway_analytics SET transaction_count = ?, success_rate = ?, average_fee = ?, total_volume = ? WHERE id = ?'
+      ).run(newCount, newSuccessRate, newAvgFee, newVolume, existing.id);
+    } else {
+      // Create new record
+      db.prepare(
+        'INSERT INTO gateway_analytics (gateway_name, transaction_count, success_rate, average_fee, total_volume, date) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(gatewayName, 1, success ? 100 : 0, fees, amount, today);
+    }
+  } catch (error) {
+    logger.error('Failed to update gateway analytics', { error: error.message });
+  }
+}
+
 // Stripe webhook (set STRIPE_WEBHOOK_SECRET)
 app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), (req, res) => {
   if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return res.sendStatus(200);
@@ -703,6 +905,74 @@ app.get('/admin/sales', ensureAdmin, (req, res) => {
     ORDER BY datetime(a.end_time) ASC
   `).all();
   res.render('admin/sales', { user: req.session.user, orders, openBids, dayjs });
+});
+
+// Admin payment analytics page
+app.get('/admin/analytics', ensureAdmin, (req, res) => {
+  try {
+    // Get gateway analytics for last 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const analytics = db.prepare(`
+      SELECT 
+        gateway_name,
+        SUM(transaction_count) as total_transactions,
+        AVG(success_rate) as avg_success_rate,
+        AVG(average_fee) as avg_fee_rate,
+        SUM(total_volume) as total_volume,
+        MAX(date) as last_transaction_date
+      FROM gateway_analytics 
+      WHERE date >= ?
+      GROUP BY gateway_name
+      ORDER BY total_volume DESC
+    `).all(thirtyDaysAgo.toISOString().split('T')[0]);
+
+    // Get daily analytics for charts
+    const dailyAnalytics = db.prepare(`
+      SELECT 
+        date,
+        gateway_name,
+        transaction_count,
+        success_rate,
+        total_volume
+      FROM gateway_analytics
+      WHERE date >= ?
+      ORDER BY date DESC, gateway_name
+    `).all(thirtyDaysAgo.toISOString().split('T')[0]);
+
+    // Get recent orders by gateway
+    const recentOrders = db.prepare(`
+      SELECT 
+        o.id,
+        o.payment_gateway,
+        o.amount,
+        o.gateway_fees,
+        o.status,
+        o.created_at,
+        u.email as user_email,
+        p.name as product_name,
+        p.brand
+      FROM orders o
+      LEFT JOIN users u ON u.id = o.user_id
+      LEFT JOIN auctions a ON a.id = o.auction_id
+      LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
+      WHERE o.created_at >= datetime('now', '-30 days')
+      ORDER BY o.created_at DESC
+      LIMIT 100
+    `).all();
+
+    res.render('admin/analytics', { 
+      user: req.session.user, 
+      analytics, 
+      dailyAnalytics, 
+      recentOrders, 
+      dayjs 
+    });
+  } catch (error) {
+    logger.error('Failed to load payment analytics', { error: error.message });
+    res.status(500).send('Failed to load analytics');
+  }
 });
 
 // CSV Export Products

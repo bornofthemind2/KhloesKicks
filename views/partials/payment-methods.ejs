@@ -56,11 +56,29 @@
     </div>
     <div id="google-pay-button-container"></div>
   </div>
+
+  <!-- Razorpay (Multiple payment methods) -->
+  <div class="payment-option razorpay-option">
+    <div class="payment-header">
+      <div class="payment-icon">💎</div>
+      <div class="payment-info">
+        <h4>Razorpay</h4>
+        <p>Cards, UPI, Wallets, Crypto & More</p>
+      </div>
+      <div class="payment-badge crypto">Crypto Supported</div>
+    </div>
+    <button id="razorpay-button" class="btn-payment razorpay">
+      💳 Pay with Razorpay
+    </button>
+  </div>
 </div>
 
-<!-- PayPal SDK -->
+<!-- Payment SDKs -->
 <% if (typeof amount !== 'undefined' && amount > 0) { %>
+<!-- PayPal SDK -->
 <script src="https://www.paypal.com/sdk/js?client-id=<%= process.env.PAYPAL_CLIENT_ID || 'sb' %>&currency=USD"></script>
+<!-- Razorpay SDK -->
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   // PayPal integration
@@ -120,6 +138,92 @@ document.addEventListener('DOMContentLoaded', function() {
   // Google Pay detection (simplified)
   if (typeof google !== 'undefined' && google.payments) {
     document.getElementById('google-pay-option').style.display = 'block';
+  }
+
+  // Razorpay integration
+  const razorpayButton = document.getElementById('razorpay-button');
+  if (razorpayButton) {
+    razorpayButton.addEventListener('click', async function() {
+      try {
+        // Create Razorpay order
+        const orderResponse = await fetch('/payment/razorpay/create-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            amount: <%= amount %>,
+            currency: 'USD',
+            auctionId: <%= auctionId || 'null' %>,
+            productId: <%= productId || 'null' %>
+          })
+        });
+
+        if (!orderResponse.ok) {
+          throw new Error('Failed to create order');
+        }
+
+        const orderData = await orderResponse.json();
+        
+        // Configure Razorpay options
+        const razorpayOptions = {
+          key: '<%= process.env.RAZORPAY_KEY_ID || "" %>',
+          amount: orderData.razorpayOrder.amount,
+          currency: orderData.razorpayOrder.currency,
+          name: 'Khloe\'s Kicks',
+          description: '<%= description || "Sneaker Purchase" %>',
+          order_id: orderData.razorpayOrder.id,
+          image: '/public/logo.png',
+          handler: async function(response) {
+            try {
+              // Verify payment on server
+              const verifyResponse = await fetch('/payment/razorpay/verify', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature
+                })
+              });
+
+              if (verifyResponse.ok) {
+                const verifyData = await verifyResponse.json();
+                window.location.href = `/order/${verifyData.orderId}/success`;
+              } else {
+                throw new Error('Payment verification failed');
+              }
+            } catch (error) {
+              console.error('Payment verification error:', error);
+              alert('Payment verification failed. Please contact support.');
+            }
+          },
+          prefill: {
+            name: '<%= user?.name || "" %>',
+            email: '<%= user?.email || "" %>',
+            contact: '<%= user?.phone || "" %>'
+          },
+          theme: {
+            color: '#667eea'
+          },
+          modal: {
+            ondismiss: function() {
+              console.log('Razorpay checkout dismissed');
+            }
+          }
+        };
+
+        // Open Razorpay checkout
+        const rzp = new Razorpay(razorpayOptions);
+        rzp.open();
+
+      } catch (error) {
+        console.error('Razorpay payment error:', error);
+        alert('Payment failed. Please try again.');
+      }
+    });
   }
 });
 </script>
@@ -195,6 +299,14 @@ document.addEventListener('DOMContentLoaded', function() {
   font-weight: 600;
   text-transform: uppercase;
 }
+.payment-badge.crypto {
+  background: linear-gradient(135deg, #f7931e 0%, #ac39ac 100%);
+  animation: cryptoGlow 2s ease-in-out infinite alternate;
+}
+@keyframes cryptoGlow {
+  from { box-shadow: 0 0 5px rgba(247, 147, 30, 0.5); }
+  to { box-shadow: 0 0 15px rgba(172, 57, 172, 0.8); }
+}
 
 .btn-payment {
   width: 100%;
@@ -231,6 +343,17 @@ document.addEventListener('DOMContentLoaded', function() {
 .btn-payment.apple:hover {
   background: #333;
   transform: translateY(-2px);
+}
+
+.btn-payment.razorpay {
+  background: linear-gradient(135deg, #3395ff 0%, #3dd5f0 100%);
+  color: white;
+}
+
+.btn-payment.razorpay:hover {
+  background: linear-gradient(135deg, #2980d9 0%, #2bc4da 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(51, 149, 255, 0.5);
 }
 
 .paypal-container {
