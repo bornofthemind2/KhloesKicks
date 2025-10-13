@@ -67,11 +67,31 @@
     <div class="bidding-section">
       <h3>Place a Bid</h3>
       <% if (user) { %>
-        <form method="post" action="/auction/<%= auction.auction_id %>/bid">
-          <label>Your bid (increments of $100):</label>
-          <input type="number" name="amount" step="100" min="100" required />
-          <button class="btn" type="submit">Place Bid</button>
-        </form>
+        <div class="bid-controls">
+          <div class="quick-bids">
+            <button type="button" class="quick-bid" data-increment="5">+$5</button>
+            <button type="button" class="quick-bid" data-increment="10">+$10</button>
+            <button type="button" class="quick-bid" data-increment="25">+$25</button>
+            <button type="button" class="quick-bid" data-increment="50">+$50</button>
+            <button type="button" class="quick-bid" data-increment="100">+$100</button>
+          </div>
+          <form method="post" action="/auction/<%= auction.auction_id %>/bid" class="bid-form">
+            <div class="bid-input-container">
+              <label for="bidAmount">Your bid:</label>
+              <input 
+                type="number" 
+                id="bidAmount" 
+                name="amount" 
+                step="1" 
+                min="<%= (auction.current_bid || auction.starting_bid) + 1 %>"
+                value="<%= (auction.current_bid || auction.starting_bid) + 5 %>"
+                class="bid-input" 
+                required 
+              />
+              <button class="btn-bid" type="submit">🚀 Place Bid</button>
+            </div>
+          </form>
+        </div>
         <% if (auction.current_bid_user_id === user.id) { %>
           <form method="post" action="/checkout/<%= auction.auction_id %>" style="margin-top:10px;">
             <button class="btn primary" type="submit">Checkout current bid</button>
@@ -243,6 +263,108 @@
 }
 .bidding-section h3 {
   margin-bottom: 15px;
+}
+
+/* Enhanced Bidding Styles */
+.bid-controls {
+  background: #f8fafc;
+  padding: 20px;
+  border-radius: 12px;
+  border: 2px solid #e2e8f0;
+}
+.quick-bids {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.quick-bid {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 12px 16px;
+  border-radius: 25px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+  flex: 1;
+  min-width: 80px;
+}
+.quick-bid:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+  background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+}
+.quick-bid:active {
+  transform: translateY(0);
+}
+.bid-form {
+  margin: 0;
+}
+.bid-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.bid-input-container label {
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 5px;
+}
+.bid-input {
+  padding: 15px 20px;
+  border: 2px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: center;
+  transition: all 0.3s ease;
+  background: white;
+}
+.bid-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+.btn-bid {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  padding: 16px 24px;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.btn-bid:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.6);
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+.btn-bid:active {
+  transform: translateY(-1px);
+}
+
+@media (max-width: 768px) {
+  .quick-bid {
+    padding: 10px 12px;
+    font-size: 13px;
+    min-width: 70px;
+  }
+  .bid-input {
+    font-size: 16px;
+    padding: 12px 16px;
+  }
+  .btn-bid {
+    padding: 14px 20px;
+    font-size: 15px;
+  }
 }
 
 /* Payment Methods Section */
@@ -466,4 +588,36 @@ function changeMainImage(imageUrl, thumbnailElement) {
   thumbnails.forEach(thumb => thumb.classList.remove('active'));
   thumbnailElement.classList.add('active');
 }
+
+// Quick bid functionality
+document.addEventListener('DOMContentLoaded', function() {
+  const quickBidButtons = document.querySelectorAll('.quick-bid');
+  const bidInput = document.getElementById('bidAmount');
+  
+  if (bidInput && quickBidButtons.length > 0) {
+    quickBidButtons.forEach(button => {
+      button.addEventListener('click', function() {
+        const increment = parseInt(this.getAttribute('data-increment'));
+        const currentValue = parseInt(bidInput.value) || 0;
+        const newValue = currentValue + increment;
+        
+        bidInput.value = newValue;
+        
+        // Add visual feedback
+        this.style.transform = 'scale(0.95)';
+        setTimeout(() => {
+          this.style.transform = '';
+        }, 150);
+        
+        // Highlight the input field briefly
+        bidInput.style.borderColor = '#10b981';
+        bidInput.style.boxShadow = '0 0 0 3px rgba(16, 185, 129, 0.1)';
+        setTimeout(() => {
+          bidInput.style.borderColor = '#d1d5db';
+          bidInput.style.boxShadow = 'none';
+        }, 1000);
+      });
+    });
+  }
+});
 </script>

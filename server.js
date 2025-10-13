@@ -187,7 +187,12 @@ function ensureAdmin(req, res, next) {
 }
 function allowedBrand(brand) {
   const b = String(brand || '').toLowerCase();
-  return ['nike','adidas','reebok','new balance'].some(x => b === x || b.includes(x));
+  return [
+    'nike', 'adidas', 'reebok', 'new balance',
+    'jordan', 'yeezy', 'off-white', 'supreme', 
+    'travis scott', 'balenciaga', 'golden goose',
+    'fragment', 'sacai', 'human race'
+  ].some(x => b === x || b.includes(x));
 }
 
 // Settings helpers
