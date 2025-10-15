@@ -37,6 +37,43 @@
       <% }) %>
     </div>
   </section>
+<% } else if (featuredProducts && featuredProducts.length > 0) { %>
+  <section class="hero">
+    <h1 class="hero-title">Featured Kicks</h1>
+    <p class="hero-subtitle">Hand-picked sneakers from our catalog</p>
+    <div class="hero-grid">
+      <% featuredProducts.forEach(p => { %>
+        <div class="hero-card">
+          <% if (p.image_url) { %>
+            <img src="<%= p.image_url %>" class="hero-img" alt="<%= p.name %>" />
+          <% } %>
+          <div class="hero-content">
+            <div class="hero-badge"><%= p.brand %></div>
+            <h2><%= p.name %></h2>
+            <% if (p.description) { %>
+              <p class="hero-desc"><%= p.description %></p>
+            <% } %>
+            <div class="hero-stats">
+              <div class="stat">
+                <span class="stat-label">Market Value</span>
+                <span class="stat-value">$<%= p.highest_market_price %></span>
+              </div>
+              <% if (p.buy_it_now_price && Number(p.buy_it_now_price) > 0) { %>
+              <div class="stat">
+                <span class="stat-label">Buy Now</span>
+                <span class="stat-value">$<%= p.buy_it_now_price %></span>
+              </div>
+              <% } %>
+            </div>
+            <a class="btn btn-hero" href="/">
+              <span class="btn-hero-icon">👟</span>
+              <span class="btn-hero-text">Browse Auctions</span>
+            </a>
+          </div>
+        </div>
+      <% }) %>
+    </div>
+  </section>
 <% } %>
 
 <section class="auctions-section">

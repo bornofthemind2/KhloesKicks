@@ -557,6 +557,15 @@ app.get('/', (req, res) => {
     LIMIT 3
   `).all();
   
+  // Fallback: featured products even if they don't currently have an open auction
+  const featuredProducts = db.prepare(`
+    SELECT p.*
+    FROM products p
+    WHERE p.is_featured = 1
+    ORDER BY p.id DESC
+    LIMIT 3
+  `).all();
+
   // Get all open auctions
   const auctions = db.prepare(`
     SELECT a.*, p.name as product_name, p.brand, p.image_url, p.highest_market_price
@@ -566,7 +575,7 @@ app.get('/', (req, res) => {
     ORDER BY datetime(a.end_time) ASC
   `).all();
   
-  res.render('home', { user: req.session.user, auctions, featuredAuctions, dayjs });
+  res.render('home', { user: req.session.user, auctions, featuredAuctions, featuredProducts, dayjs });
 });
 
 // Product/Auction detail
