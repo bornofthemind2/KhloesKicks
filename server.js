@@ -1413,7 +1413,7 @@ app.get('/admin/import', ensureAdmin, (req, res) => {
 app.post('/admin/import', ensureAdmin, upload.single('csv'), (req, res) => {
   if (!req.file) return res.render('admin/import', { user: req.session.user, error: 'No file', success: null });
   const buf = fs.readFileSync(req.file.path);
-  const rows = parse(buf, { columns: true, skip_empty_lines: true });
+  const rows = parse(buf, { columns: true, skip_empty_lines: true, relax_column_count: true, relax_quotes: true, trim: true, bom: true });
   let added = 0;
   const insert = db.prepare('INSERT INTO products (brand, name, sku, size, description, image_url, highest_market_price) VALUES (?,?,?,?,?,?,?)');
   for (const r of rows) {
