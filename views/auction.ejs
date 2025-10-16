@@ -82,8 +82,8 @@
                 type="number" 
                 id="bidAmount" 
                 name="amount" 
-                step="1" 
-                min="<%= (auction.current_bid || auction.starting_bid) + 1 %>"
+                step="5" 
+                min="<%= (auction.current_bid || auction.starting_bid) + 5 %>"
                 value="<%= (auction.current_bid || auction.starting_bid) + 5 %>"
                 class="bid-input" 
                 required 

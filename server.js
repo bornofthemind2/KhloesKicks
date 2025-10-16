@@ -605,8 +605,8 @@ app.post('/auction/:id/bid', ensureAuth, (req, res) => {
   }
   const amt = Number(amount);
   if (!Number.isFinite(amt) || amt <= 0) return res.status(400).send('Invalid amount');
-  if (amt % 100 !== 0) return res.status(400).send('Bids must be in increments of 100');
-  const min = Math.max(auction.starting_bid, auction.current_bid || 0) + 100;
+  if (amt % 5 !== 0) return res.status(400).send('Bids must be in increments of 5');
+  const min = Math.max(auction.starting_bid, auction.current_bid || 0) + 5;
   if (amt < min) return res.status(400).send(`Minimum next bid is ${min}`);
 
   const tx = db.transaction(() => {
