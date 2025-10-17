@@ -283,160 +283,191 @@ app.get('/logout', (req, res) => {
 });
 
 // Home: list open auctions
-app.get('/', (req, res) => {
-  const brandFilter = req.query.brand;
-  
-  // Get featured products with active auctions (filter by brand if specified)
-  let featuredAuctionsQuery = `
-    SELECT a.*, p.name as product_name, p.brand, p.image_url, p.highest_market_price, p.description
-    FROM auctions a
-    JOIN products p ON p.id = a.product_id
-    WHERE a.status = 'open' AND p.is_featured = 1
-  `;
-  
-  if (brandFilter) {
-    featuredAuctionsQuery += ` AND p.brand = ?`;
-  }
-  
-  featuredAuctionsQuery += `
-    ORDER BY datetime(a.end_time) ASC
-    LIMIT 3
-  `;
-  
-  const featuredAuctions = brandFilter 
-    ? db.prepare(featuredAuctionsQuery).all(brandFilter)
-    : db.prepare(featuredAuctionsQuery).all();
-  
-  // Fallback: featured products even if they don't currently have an open auction
-  let featuredProductsQuery = `
-    SELECT p.*
-    FROM products p
-    WHERE p.is_featured = 1
-  `;
-  
-  if (brandFilter) {
-    featuredProductsQuery += ` AND p.brand = ?`;
-  }
-  
-  featuredProductsQuery += `
-    ORDER BY p.id DESC
-    LIMIT 3
-  `;
-  
-  const featuredProducts = brandFilter 
-    ? db.prepare(featuredProductsQuery).all(brandFilter)
-    : db.prepare(featuredProductsQuery).all();
+app.get('/', async (req, res) => {
+  try {
+    const brandFilter = req.query.brand;
+    
+    // Get featured products with active auctions (filter by brand if specified)
+    let featuredAuctionsQuery = `
+      SELECT a.*, p.name as product_name, p.brand, p.image_url, p.highest_market_price, p.description
+      FROM auctions a
+      JOIN products p ON p.id = a.product_id
+      WHERE a.status = 'open' AND p.is_featured = 1
+    `;
+    
+    const featuredAuctionsParams = [];
+    if (brandFilter) {
+      featuredAuctionsQuery += ` AND p.brand = $1`;
+      featuredAuctionsParams.push(brandFilter);
+    }
+    
+    featuredAuctionsQuery += `
+      ORDER BY a.end_time ASC
+      LIMIT 3
+    `;
+    
+    const featuredAuctions = await prepare(featuredAuctionsQuery).all(featuredAuctionsParams);
+    
+    // Fallback: featured products even if they don't currently have an open auction
+    let featuredProductsQuery = `
+      SELECT p.*
+      FROM products p
+      WHERE p.is_featured = 1
+    `;
+    
+    const featuredProductsParams = [];
+    if (brandFilter) {
+      featuredProductsQuery += ` AND p.brand = $1`;
+      featuredProductsParams.push(brandFilter);
+    }
+    
+    featuredProductsQuery += `
+      ORDER BY p.id DESC
+      LIMIT 3
+    `;
+    
+    const featuredProducts = await prepare(featuredProductsQuery).all(featuredProductsParams);
 
-  // Get all open auctions (filter by brand if specified)
-  let auctionsQuery = `
-    SELECT a.*, p.name as product_name, p.brand, p.image_url, p.highest_market_price
-    FROM auctions a
-    JOIN products p ON p.id = a.product_id
-    WHERE a.status = 'open'
-  `;
-  
-  if (brandFilter) {
-    auctionsQuery += ` AND p.brand = ?`;
+    // Get all open auctions (filter by brand if specified)
+    let auctionsQuery = `
+      SELECT a.*, p.name as product_name, p.brand, p.image_url, p.highest_market_price
+      FROM auctions a
+      JOIN products p ON p.id = a.product_id
+      WHERE a.status = 'open'
+    `;
+    
+    const auctionsParams = [];
+    if (brandFilter) {
+      auctionsQuery += ` AND p.brand = $1`;
+      auctionsParams.push(brandFilter);
+    }
+    
+    auctionsQuery += `
+      ORDER BY a.end_time ASC
+    `;
+    
+    const auctions = await prepare(auctionsQuery).all(auctionsParams);
+    
+    // Get popular brands with one product each
+    const popularBrandsResult = await query(`
+      WITH brand_counts AS (
+        SELECT brand, COUNT(*) as product_count
+        FROM products 
+        GROUP BY brand
+        HAVING COUNT(*) > 0
+        ORDER BY COUNT(*) DESC
+        LIMIT 6
+      )
+      SELECT DISTINCT p.*, bc.product_count
+      FROM brand_counts bc
+      JOIN products p ON p.brand = bc.brand
+      WHERE p.id = (
+        SELECT id FROM products p2 
+        WHERE p2.brand = bc.brand 
+        ORDER BY p2.highest_market_price DESC, p2.id DESC 
+        LIMIT 1
+      )
+      ORDER BY bc.product_count DESC, p.highest_market_price DESC
+    `);
+    
+    const popularBrands = popularBrandsResult.rows;
+    
+    res.render('home', { 
+      user: req.session.user, 
+      auctions, 
+      featuredAuctions, 
+      featuredProducts, 
+      popularBrands, 
+      brandFilter, 
+      dayjs 
+    });
+  } catch (error) {
+    logger.error('Error loading home page:', error);
+    res.status(500).send('Internal server error');
   }
-  
-  auctionsQuery += `
-    ORDER BY datetime(a.end_time) ASC
-  `;
-  
-  const auctions = brandFilter 
-    ? db.prepare(auctionsQuery).all(brandFilter)
-    : db.prepare(auctionsQuery).all();
-  
-  // Get popular brands with one product each
-  const popularBrands = db.prepare(`
-    WITH brand_counts AS (
-      SELECT brand, COUNT(*) as product_count
-      FROM products 
-      GROUP BY brand
-      HAVING COUNT(*) > 0
-      ORDER BY COUNT(*) DESC
-      LIMIT 6
-    )
-    SELECT DISTINCT p.*, bc.product_count
-    FROM brand_counts bc
-    JOIN products p ON p.brand = bc.brand
-    WHERE p.id = (
-      SELECT id FROM products p2 
-      WHERE p2.brand = bc.brand 
-      ORDER BY p2.highest_market_price DESC, p2.id DESC 
-      LIMIT 1
-    )
-    ORDER BY bc.product_count DESC, p.highest_market_price DESC
-  `).all();
-  
-  res.render('home', { 
-    user: req.session.user, 
-    auctions, 
-    featuredAuctions, 
-    featuredProducts, 
-    popularBrands, 
-    brandFilter, 
-    dayjs 
-  });
 });
 
 // Product/Auction detail
-app.get('/auction/:id', (req, res) => {
-  const id = Number(req.params.id);
-  const auction = db.prepare(`
-    SELECT a.*, p.*,
-      a.id as auction_id,
-      p.id as product_id
-    FROM auctions a JOIN products p ON p.id = a.product_id WHERE a.id = ?
-  `).get(id);
-  if (!auction) return res.status(404).send('Auction not found');
-  const bids = db.prepare(`SELECT b.*, u.email FROM bids b JOIN users u ON u.id = b.user_id WHERE auction_id = ? ORDER BY datetime(created_at) DESC`).all(id);
-  const images = db.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY display_order, id').all(auction.product_id);
-  res.render('auction', { user: req.session.user, auction, bids, images, dayjs });
+app.get('/auction/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const auction = await prepare(`
+      SELECT a.*, p.*,
+        a.id as auction_id,
+        p.id as product_id
+      FROM auctions a JOIN products p ON p.id = a.product_id WHERE a.id = $1
+    `).get([id]);
+    
+    if (!auction) return res.status(404).send('Auction not found');
+    
+    const bids = await prepare(
+      `SELECT b.*, u.email FROM bids b JOIN users u ON u.id = b.user_id WHERE auction_id = $1 ORDER BY created_at DESC`
+    ).all([id]);
+    
+    const images = await prepare('SELECT * FROM product_images WHERE product_id = $1 ORDER BY display_order, id').all([auction.product_id]);
+    
+    res.render('auction', { user: req.session.user, auction, bids, images, dayjs });
+  } catch (error) {
+    logger.error('Error loading auction:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Place bid
-app.post('/auction/:id/bid', ensureAuth, (req, res) => {
-  const id = Number(req.params.id);
-  const { amount } = req.body;
-  const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(id);
-  if (!auction) return res.status(404).send('Not found');
-  const now = dayjs();
-  if (dayjs(auction.end_time).isBefore(now) || auction.status !== 'open') {
-    return res.status(400).send('Auction ended');
-  }
-  const amt = Number(amount);
-  if (!Number.isFinite(amt) || amt <= 0) return res.status(400).send('Invalid amount');
-  if (amt % 5 !== 0) return res.status(400).send('Bids must be in increments of 5');
-  const min = Math.max(auction.starting_bid, auction.current_bid || 0) + 5;
-  if (amt < min) return res.status(400).send(`Minimum next bid is ${min}`);
+app.post('/auction/:id/bid', ensureAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { amount } = req.body;
+    const auction = await prepare('SELECT * FROM auctions WHERE id = $1').get([id]);
+    
+    if (!auction) return res.status(404).send('Not found');
+    
+    const now = dayjs();
+    if (dayjs(auction.end_time).isBefore(now) || auction.status !== 'open') {
+      return res.status(400).send('Auction ended');
+    }
+    
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return res.status(400).send('Invalid amount');
+    if (amt % 5 !== 0) return res.status(400).send('Bids must be in increments of 5');
+    
+    const min = Math.max(auction.starting_bid, auction.current_bid || 0) + 5;
+    if (amt < min) return res.status(400).send(`Minimum next bid is ${min}`);
 
-  const tx = db.transaction(() => {
-    db.prepare('INSERT INTO bids (auction_id, user_id, amount, created_at) VALUES (?,?,?,?)')
-      .run(id, req.session.user.id, amt, dayjs().toISOString());
-    db.prepare('UPDATE auctions SET current_bid = ?, current_bid_user_id = ? WHERE id = ?')
-      .run(amt, req.session.user.id, id);
-  });
-  tx();
-  res.redirect('/auction/' + id);
+    // Use PostgreSQL transaction
+    await query('INSERT INTO bids (auction_id, user_id, amount, created_at) VALUES ($1, $2, $3, $4)', 
+      [id, req.session.user.id, amt, dayjs().toISOString()]);
+    await query('UPDATE auctions SET current_bid = $1, current_bid_user_id = $2 WHERE id = $3',
+      [amt, req.session.user.id, id]);
+    
+    res.redirect('/auction/' + id);
+  } catch (error) {
+    logger.error('Error placing bid:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Checkout for winning bidder (or allow immediate checkout by current highest)
 app.post('/checkout/:auctionId', ensureAuth, async (req, res) => {
-  const auctionId = Number(req.params.auctionId);
-  const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(auctionId);
-  if (!auction) return res.status(404).send('Not found');
-  if (!auction.current_bid || auction.current_bid_user_id !== req.session.user.id) {
-    return res.status(400).send('Only current highest bidder can checkout');
-  }
-  if (!stripe) return res.status(500).send('Stripe not configured');
+  try {
+    const auctionId = Number(req.params.auctionId);
+    const auction = await prepare('SELECT * FROM auctions WHERE id = $1').get([auctionId]);
+    
+    if (!auction) return res.status(404).send('Not found');
+    if (!auction.current_bid || auction.current_bid_user_id !== req.session.user.id) {
+      return res.status(400).send('Only current highest bidder can checkout');
+    }
+    if (!stripe) return res.status(500).send('Stripe not configured');
 
-  const prod = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
-  const connectedId = getSetting('stripe_connected_account_id');
-  // Create order placeholder
-  const orderRes = db.prepare('INSERT INTO orders (auction_id, user_id, amount, status, created_at) VALUES (?,?,?,?,?)')
-    .run(auctionId, req.session.user.id, auction.current_bid, 'pending', dayjs().toISOString());
-  const orderId = orderRes.lastInsertRowid;
+    const prod = await prepare('SELECT * FROM products WHERE id = $1').get([auction.product_id]);
+    const connectedId = await getSetting('stripe_connected_account_id');
+    
+    // Create order placeholder
+    const orderResult = await query(
+      'INSERT INTO orders (auction_id, user_id, amount, status, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [auctionId, req.session.user.id, auction.current_bid, 'pending', dayjs().toISOString()]
+    );
+    const orderId = orderResult.rows[0].id;
 
   try {
     const sessionCreate = {
@@ -463,31 +494,34 @@ app.post('/checkout/:auctionId', ensureAuth, async (req, res) => {
     }
 
     const session = await stripe.checkout.sessions.create(sessionCreate);
-    db.prepare('UPDATE orders SET stripe_session_id = ? WHERE id = ?').run(session.id, orderId);
+    await query('UPDATE orders SET stripe_session_id = $1 WHERE id = $2', [session.id, orderId]);
     res.redirect(session.url);
   } catch (e) {
-    console.error(e);
+    logger.error('Stripe checkout error:', e);
     res.status(500).send('Stripe error');
   }
 });
 
 // Buy It Now - Direct purchase bypassing auction
 app.post('/buy-now/:productId', ensureAuth, async (req, res) => {
-  const productId = Number(req.params.productId);
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
-  
-  if (!product) return res.status(404).send('Product not found');
-  if (!product.buy_it_now_price || product.buy_it_now_price <= 0) {
-    return res.status(400).send('Buy It Now not available for this product');
-  }
-  if (!stripe) return res.status(500).send('Stripe not configured');
-  
-  const connectedId = getSetting('stripe_connected_account_id');
-  
-  // Create order placeholder for Buy It Now
-  const orderRes = db.prepare('INSERT INTO orders (product_id, user_id, amount, order_type, status, created_at) VALUES (?,?,?,?,?,?)')
-    .run(productId, req.session.user.id, product.buy_it_now_price, 'buy_now', 'pending', dayjs().toISOString());
-  const orderId = orderRes.lastInsertRowid;
+  try {
+    const productId = Number(req.params.productId);
+    const product = await prepare('SELECT * FROM products WHERE id = $1').get([productId]);
+    
+    if (!product) return res.status(404).send('Product not found');
+    if (!product.buy_it_now_price || product.buy_it_now_price <= 0) {
+      return res.status(400).send('Buy It Now not available for this product');
+    }
+    if (!stripe) return res.status(500).send('Stripe not configured');
+    
+    const connectedId = await getSetting('stripe_connected_account_id');
+    
+    // Create order placeholder for Buy It Now
+    const orderResult = await query(
+      'INSERT INTO orders (product_id, user_id, amount, order_type, status, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [productId, req.session.user.id, product.buy_it_now_price, 'buy_now', 'pending', dayjs().toISOString()]
+    );
+    const orderId = orderResult.rows[0].id;
   
   try {
     const sessionCreate = {
@@ -516,10 +550,10 @@ app.post('/buy-now/:productId', ensureAuth, async (req, res) => {
     }
     
     const session = await stripe.checkout.sessions.create(sessionCreate);
-    db.prepare('UPDATE orders SET stripe_session_id = ? WHERE id = ?').run(session.id, orderId);
+    await query('UPDATE orders SET stripe_session_id = $1 WHERE id = $2', [session.id, orderId]);
     res.redirect(session.url);
   } catch (e) {
-    console.error(e);
+    logger.error('Buy It Now error:', e);
     res.status(500).send('Stripe error: ' + e.message);
   }
 });
@@ -1656,48 +1690,65 @@ app.get('/admin/uline-suggestion', ensureAdmin, (req, res) => {
 app.get('/admin', ensureAdmin, (req, res) => res.redirect('/admin/sales'));
 
 // Minimal pages
-app.get('/products', ensureAdmin, (req, res) => {
-  const products = db.prepare('SELECT * FROM products ORDER BY id DESC').all();
-  
-  // Get auction data for each product
-  const productsWithAuctions = products.map(product => {
-    const auctions = db.prepare('SELECT * FROM auctions WHERE product_id = ? ORDER BY id DESC').all(product.id);
-    return { ...product, auctions };
-  });
-  
-  res.render('admin/products', { user: req.session.user, products: productsWithAuctions });
+app.get('/products', ensureAdmin, async (req, res) => {
+  try {
+    const products = await prepare('SELECT * FROM products ORDER BY id DESC').all();
+    
+    // Get auction data for each product
+    const productsWithAuctions = [];
+    for (const product of products) {
+      const auctions = await prepare('SELECT * FROM auctions WHERE product_id = $1 ORDER BY id DESC').all([product.id]);
+      productsWithAuctions.push({ ...product, auctions });
+    }
+    
+    res.render('admin/products', { user: req.session.user, products: productsWithAuctions });
+  } catch (error) {
+    logger.error('Error loading products:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Product edit page
-app.get('/products/:id/edit', ensureAdmin, (req, res) => {
-  const id = Number(req.params.id);
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
-  if (!product) return res.status(404).send('Product not found');
-  const images = db.prepare('SELECT * FROM product_images WHERE product_id = ? ORDER BY display_order, id').all(id);
-  
-  // Check for active auction for this product
-  const activeAuction = db.prepare('SELECT * FROM auctions WHERE product_id = ? AND status = ? ORDER BY id DESC LIMIT 1').get(id, 'open');
-  
-  res.render('admin/edit-product', { 
-    user: req.session.user, 
-    product, 
-    images, 
-    activeAuction, 
-    error: null, 
-    success: null 
-  });
+app.get('/products/:id/edit', ensureAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const product = await prepare('SELECT * FROM products WHERE id = $1').get([id]);
+    if (!product) return res.status(404).send('Product not found');
+    
+    const images = await prepare('SELECT * FROM product_images WHERE product_id = $1 ORDER BY display_order, id').all([id]);
+    
+    // Check for active auction for this product
+    const activeAuction = await prepare('SELECT * FROM auctions WHERE product_id = $1 AND status = $2 ORDER BY id DESC LIMIT 1').get([id, 'open']);
+    
+    res.render('admin/edit-product', { 
+      user: req.session.user, 
+      product, 
+      images, 
+      activeAuction, 
+      error: null, 
+      success: null 
+    });
+  } catch (error) {
+    logger.error('Error loading product edit page:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Toggle featured status
-app.post('/products/:id/toggle-featured', ensureAdmin, (req, res) => {
-  const id = Number(req.params.id);
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
-  if (!product) return res.status(404).send('Product not found');
-  
-  const newFeaturedStatus = product.is_featured ? 0 : 1;
-  db.prepare('UPDATE products SET is_featured = ? WHERE id = ?').run(newFeaturedStatus, id);
-  
-  res.redirect('/products');
+app.post('/products/:id/toggle-featured', ensureAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const product = await prepare('SELECT * FROM products WHERE id = $1').get([id]);
+    if (!product) return res.status(404).send('Product not found');
+    
+    const newFeaturedStatus = product.is_featured ? 0 : 1;
+    await query('UPDATE products SET is_featured = $1 WHERE id = $2', [newFeaturedStatus, id]);
+    
+    res.redirect('/products');
+  } catch (error) {
+    logger.error('Error toggling featured status:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Update product
@@ -1805,48 +1856,42 @@ app.delete('/api/products/:productId/images/:imageId', ensureAdmin, (req, res) =
 });
 
 // API: Create auction
-app.post('/api/auctions', ensureAdmin, (req, res) => {
-  const { product_id, starting_bid, duration, reserve_price } = req.body;
-  
-  if (!product_id || !starting_bid || !duration) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-  
-  const productId = Number(product_id);
-  const startingBid = Number(starting_bid);
-  const durationDays = Number(duration);
-  
-  // Check if product exists
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
-  if (!product) {
-    return res.status(404).json({ error: 'Product not found' });
-  }
-  
-  // Check if product already has an active auction
-  const existingAuction = db.prepare('SELECT * FROM auctions WHERE product_id = ? AND status = ?').get(productId, 'open');
-  if (existingAuction) {
-    return res.status(400).json({ error: 'Product already has an active auction' });
-  }
-  
+app.post('/api/auctions', ensureAdmin, async (req, res) => {
   try {
+    const { product_id, starting_bid, duration, reserve_price } = req.body;
+    
+    if (!product_id || !starting_bid || !duration) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const productId = Number(product_id);
+    const startingBid = Number(starting_bid);
+    const durationDays = Number(duration);
+    
+    // Check if product exists
+    const product = await prepare('SELECT * FROM products WHERE id = $1').get([productId]);
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    
+    // Check if product already has an active auction
+    const existingAuction = await prepare('SELECT * FROM auctions WHERE product_id = $1 AND status = $2').get([productId, 'open']);
+    if (existingAuction) {
+      return res.status(400).json({ error: 'Product already has an active auction' });
+    }
+    
     const start = dayjs();
     const end = start.add(durationDays, 'day');
     
-    const auctionData = {
-      product_id: productId,
-      start_time: start.toISOString(),
-      end_time: end.toISOString(),
-      starting_bid: startingBid,
-      status: 'open'
-    };
-    
-    const result = db.prepare(`
+    const result = await query(`
       INSERT INTO auctions (product_id, start_time, end_time, starting_bid, status) 
-      VALUES (?, ?, ?, ?, ?)
-    `).run(productId, auctionData.start_time, auctionData.end_time, startingBid, 'open');
+      VALUES ($1, $2, $3, $4, $5) RETURNING id
+    `, [productId, start.toISOString(), end.toISOString(), startingBid, 'open']);
+    
+    const auctionId = result.rows[0].id;
     
     logger.info('Auction created', {
-      auctionId: result.lastInsertRowid,
+      auctionId,
       productId,
       startingBid,
       duration: durationDays,
@@ -1855,30 +1900,30 @@ app.post('/api/auctions', ensureAdmin, (req, res) => {
     
     res.json({ 
       success: true, 
-      auctionId: result.lastInsertRowid,
+      auctionId,
       message: 'Auction created successfully'
     });
   } catch (e) {
-    logger.error('Failed to create auction', { error: e.message, productId, startingBid });
+    logger.error('Failed to create auction', { error: e.message });
     res.status(500).json({ error: 'Failed to create auction: ' + e.message });
   }
 });
 
 // API: End auction
-app.post('/api/auctions/:id/end', ensureAdmin, (req, res) => {
-  const auctionId = Number(req.params.id);
-  
-  const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(auctionId);
-  if (!auction) {
-    return res.status(404).json({ error: 'Auction not found' });
-  }
-  
-  if (auction.status !== 'open') {
-    return res.status(400).json({ error: 'Auction is not active' });
-  }
-  
+app.post('/api/auctions/:id/end', ensureAdmin, async (req, res) => {
   try {
-    db.prepare('UPDATE auctions SET status = ? WHERE id = ?').run('ended', auctionId);
+    const auctionId = Number(req.params.id);
+    
+    const auction = await prepare('SELECT * FROM auctions WHERE id = $1').get([auctionId]);
+    if (!auction) {
+      return res.status(404).json({ error: 'Auction not found' });
+    }
+    
+    if (auction.status !== 'open') {
+      return res.status(400).json({ error: 'Auction is not active' });
+    }
+    
+    await query('UPDATE auctions SET status = $1 WHERE id = $2', ['ended', auctionId]);
     
     logger.info('Auction ended manually', {
       auctionId,
@@ -1887,7 +1932,7 @@ app.post('/api/auctions/:id/end', ensureAdmin, (req, res) => {
     
     res.json({ success: true, message: 'Auction ended successfully' });
   } catch (e) {
-    logger.error('Failed to end auction', { error: e.message, auctionId });
+    logger.error('Failed to end auction', { error: e.message, auctionId: req.params.id });
     res.status(500).json({ error: 'Failed to end auction: ' + e.message });
   }
 });
