@@ -547,35 +547,100 @@ app.get('/logout', (req, res) => {
 
 // Home: list open auctions
 app.get('/', (req, res) => {
-  // Get featured products with active auctions
-  const featuredAuctions = db.prepare(`
+  const brandFilter = req.query.brand;
+  
+  // Get featured products with active auctions (filter by brand if specified)
+  let featuredAuctionsQuery = `
     SELECT a.*, p.name as product_name, p.brand, p.image_url, p.highest_market_price, p.description
     FROM auctions a
     JOIN products p ON p.id = a.product_id
     WHERE a.status = 'open' AND p.is_featured = 1
+  `;
+  
+  if (brandFilter) {
+    featuredAuctionsQuery += ` AND p.brand = ?`;
+  }
+  
+  featuredAuctionsQuery += `
     ORDER BY datetime(a.end_time) ASC
     LIMIT 3
-  `).all();
+  `;
+  
+  const featuredAuctions = brandFilter 
+    ? db.prepare(featuredAuctionsQuery).all(brandFilter)
+    : db.prepare(featuredAuctionsQuery).all();
   
   // Fallback: featured products even if they don't currently have an open auction
-  const featuredProducts = db.prepare(`
+  let featuredProductsQuery = `
     SELECT p.*
     FROM products p
     WHERE p.is_featured = 1
+  `;
+  
+  if (brandFilter) {
+    featuredProductsQuery += ` AND p.brand = ?`;
+  }
+  
+  featuredProductsQuery += `
     ORDER BY p.id DESC
     LIMIT 3
-  `).all();
+  `;
+  
+  const featuredProducts = brandFilter 
+    ? db.prepare(featuredProductsQuery).all(brandFilter)
+    : db.prepare(featuredProductsQuery).all();
 
-  // Get all open auctions
-  const auctions = db.prepare(`
+  // Get all open auctions (filter by brand if specified)
+  let auctionsQuery = `
     SELECT a.*, p.name as product_name, p.brand, p.image_url, p.highest_market_price
     FROM auctions a
     JOIN products p ON p.id = a.product_id
     WHERE a.status = 'open'
+  `;
+  
+  if (brandFilter) {
+    auctionsQuery += ` AND p.brand = ?`;
+  }
+  
+  auctionsQuery += `
     ORDER BY datetime(a.end_time) ASC
+  `;
+  
+  const auctions = brandFilter 
+    ? db.prepare(auctionsQuery).all(brandFilter)
+    : db.prepare(auctionsQuery).all();
+  
+  // Get popular brands with one product each
+  const popularBrands = db.prepare(`
+    WITH brand_counts AS (
+      SELECT brand, COUNT(*) as product_count
+      FROM products 
+      GROUP BY brand
+      HAVING COUNT(*) > 0
+      ORDER BY COUNT(*) DESC
+      LIMIT 6
+    )
+    SELECT DISTINCT p.*, bc.product_count
+    FROM brand_counts bc
+    JOIN products p ON p.brand = bc.brand
+    WHERE p.id = (
+      SELECT id FROM products p2 
+      WHERE p2.brand = bc.brand 
+      ORDER BY p2.highest_market_price DESC, p2.id DESC 
+      LIMIT 1
+    )
+    ORDER BY bc.product_count DESC, p.highest_market_price DESC
   `).all();
   
-  res.render('home', { user: req.session.user, auctions, featuredAuctions, featuredProducts, dayjs });
+  res.render('home', { 
+    user: req.session.user, 
+    auctions, 
+    featuredAuctions, 
+    featuredProducts, 
+    popularBrands, 
+    brandFilter, 
+    dayjs 
+  });
 });
 
 // Product/Auction detail
