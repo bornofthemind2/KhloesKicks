@@ -6,8 +6,8 @@ import expressLayouts from 'express-ejs-layouts';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
-import Database from 'better-sqlite3';
 import multer from 'multer';
+import { query, prepare, initializeTables, seedAdminUser } from './database.js';
 import { parse } from 'csv-parse/sync';
 import dayjs from 'dayjs';
 import Stripe from 'stripe';
@@ -94,278 +94,22 @@ const strictLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// DB setup - Use cloud-appropriate database path
-const dbPath = process.env.NODE_ENV === 'production' 
-  ? '/tmp/data.sqlite'  // Use /tmp for temporary storage in cloud
-  : path.join(__dirname, 'data.sqlite');
-const db = new Database(dbPath);
-
-db.pragma('journal_mode = WAL');
-
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  name TEXT,
-  is_admin INTEGER DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS products (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  brand TEXT NOT NULL,
-  name TEXT NOT NULL,
-  sku TEXT,
-  size TEXT,
-  description TEXT,
-  image_url TEXT,
-  highest_market_price INTEGER DEFAULT 0,
-  is_featured INTEGER DEFAULT 0,
-  buy_it_now_price INTEGER DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS auctions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_id INTEGER NOT NULL,
-  start_time TEXT NOT NULL,
-  end_time TEXT NOT NULL,
-  starting_bid INTEGER NOT NULL,
-  current_bid INTEGER,
-  current_bid_user_id INTEGER,
-  status TEXT DEFAULT 'open',
-  FOREIGN KEY(product_id) REFERENCES products(id)
-);
-
-CREATE TABLE IF NOT EXISTS bids (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  auction_id INTEGER NOT NULL,
-  user_id INTEGER NOT NULL,
-  amount INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
-  FOREIGN KEY(auction_id) REFERENCES auctions(id),
-  FOREIGN KEY(user_id) REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  auction_id INTEGER,
-  product_id INTEGER,
-  user_id INTEGER NOT NULL,
-  amount INTEGER NOT NULL,
-  order_type TEXT DEFAULT 'auction',
-  status TEXT DEFAULT 'pending',
-  stripe_session_id TEXT,
-  payment_intent_id TEXT,
-  created_at TEXT NOT NULL,
-  FOREIGN KEY(auction_id) REFERENCES auctions(id),
-  FOREIGN KEY(product_id) REFERENCES products(id),
-  FOREIGN KEY(user_id) REFERENCES users(id)
-);
-
-CREATE TABLE IF NOT EXISTS shipments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id INTEGER NOT NULL,
-  carrier TEXT,
-  tracking_number TEXT,
-  label_pdf_path TEXT,
-  status TEXT DEFAULT 'pending',
-  to_name TEXT,
-  to_address1 TEXT,
-  to_address2 TEXT,
-  to_city TEXT,
-  to_state TEXT,
-  to_zip TEXT,
-  to_country TEXT,
-  box_length INTEGER,
-  box_width INTEGER,
-  box_height INTEGER,
-  FOREIGN KEY(order_id) REFERENCES orders(id)
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
-  value TEXT
-);
-
-CREATE TABLE IF NOT EXISTS product_images (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_id INTEGER NOT NULL,
-  image_url TEXT NOT NULL,
-  display_order INTEGER DEFAULT 0,
-  created_at TEXT NOT NULL,
-  FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
-);
-`);
-
-// Add is_featured column if it doesn't exist (migration)
-try {
-  db.exec('ALTER TABLE products ADD COLUMN is_featured INTEGER DEFAULT 0');
-  console.log('Added is_featured column to products table');
-} catch (e) {
-  // Column already exists, ignore error
+// Initialize PostgreSQL database
+async function initializeDatabase() {
+  try {
+    await initializeTables();
+    await seedAdminUser();
+    logger.info('Database initialized successfully');
+  } catch (error) {
+    logger.error('Failed to initialize database:', error);
+    process.exit(1);
+  }
 }
 
-// Add buy_it_now_price column if it doesn't exist (migration)
-try {
-  db.exec('ALTER TABLE products ADD COLUMN buy_it_now_price INTEGER DEFAULT 0');
-  console.log('Added buy_it_now_price column to products table');
-} catch (e) {
-  // Column already exists, ignore error
-}
+// Initialize database on startup
+await initializeDatabase();
 
-// Add product_id and order_type columns to orders if they don't exist (migration)
-try {
-  db.exec('ALTER TABLE orders ADD COLUMN product_id INTEGER');
-  db.exec('ALTER TABLE orders ADD COLUMN order_type TEXT DEFAULT \'auction\'');
-  logger.info('Added product_id and order_type columns to orders table');
-} catch (e) {
-  // Columns already exist, ignore error
-}
 
-// Add payment gateway columns to orders if they don't exist (migration)
-try {
-  db.exec('ALTER TABLE orders ADD COLUMN payment_gateway TEXT DEFAULT \'stripe\'');
-  db.exec('ALTER TABLE orders ADD COLUMN gateway_transaction_id TEXT');
-  db.exec('ALTER TABLE orders ADD COLUMN gateway_fees DECIMAL(10,2)');
-  logger.info('Added payment gateway columns to orders table');
-} catch (e) {
-  // Columns already exist, ignore error
-}
-
-// Add product status and availability columns if they don't exist (migration)
-try {
-  db.exec('ALTER TABLE products ADD COLUMN status TEXT DEFAULT \'available\'');
-  db.exec('ALTER TABLE products ADD COLUMN is_available INTEGER DEFAULT 1');
-  logger.info('Added status and availability columns to products table');
-} catch (e) {
-  // Columns already exist, ignore error
-}
-
-// Create gateway analytics table if it doesn't exist
-try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS gateway_analytics (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      gateway_name TEXT NOT NULL,
-      transaction_count INTEGER DEFAULT 0,
-      success_rate DECIMAL(5,2) DEFAULT 0,
-      average_fee DECIMAL(5,2) DEFAULT 0,
-      total_volume DECIMAL(15,2) DEFAULT 0,
-      date DATE NOT NULL,
-      UNIQUE(gateway_name, date)
-    );
-  `);
-  logger.info('Gateway analytics table created');
-} catch (e) {
-  logger.error('Failed to create gateway analytics table:', e.message);
-}
-
-// Create comprehensive shipping tables
-try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS shipping_rates (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id INTEGER,
-      carrier TEXT NOT NULL,
-      service_code TEXT NOT NULL,
-      service_name TEXT NOT NULL,
-      cost DECIMAL(10,2) NOT NULL,
-      currency TEXT DEFAULT 'USD',
-      transit_time TEXT,
-      delivery_date TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(order_id) REFERENCES orders(id)
-    );
-    
-    CREATE TABLE IF NOT EXISTS shipping_labels (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      shipment_id INTEGER NOT NULL,
-      carrier TEXT NOT NULL,
-      label_url TEXT,
-      label_data TEXT,
-      label_format TEXT DEFAULT 'PDF',
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(shipment_id) REFERENCES shipments(id)
-    );
-    
-    CREATE TABLE IF NOT EXISTS tracking_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      shipment_id INTEGER NOT NULL,
-      event_date TEXT NOT NULL,
-      event_time TEXT,
-      description TEXT NOT NULL,
-      location TEXT,
-      status_code TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(shipment_id) REFERENCES shipments(id)
-    );
-    
-    CREATE TABLE IF NOT EXISTS shipping_addresses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id INTEGER NOT NULL,
-      type TEXT NOT NULL, -- 'from' or 'to'
-      name TEXT NOT NULL,
-      company TEXT,
-      address_line1 TEXT NOT NULL,
-      address_line2 TEXT,
-      city TEXT NOT NULL,
-      state TEXT NOT NULL,
-      postal_code TEXT NOT NULL,
-      country TEXT DEFAULT 'US',
-      phone TEXT,
-      email TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(order_id) REFERENCES orders(id)
-    );
-  `);
-  logger.info('Shipping tables created successfully');
-} catch (e) {
-  logger.error('Failed to create shipping tables:', e.message);
-}
-
-// Add enhanced shipping columns to shipments table
-try {
-  db.exec('ALTER TABLE shipments ADD COLUMN service_code TEXT');
-  db.exec('ALTER TABLE shipments ADD COLUMN service_name TEXT');
-  db.exec('ALTER TABLE shipments ADD COLUMN shipping_cost DECIMAL(10,2)');
-  db.exec('ALTER TABLE shipments ADD COLUMN weight DECIMAL(8,2)');
-  db.exec('ALTER TABLE shipments ADD COLUMN insurance_value DECIMAL(10,2)');
-  db.exec('ALTER TABLE shipments ADD COLUMN signature_required INTEGER DEFAULT 0');
-  db.exec('ALTER TABLE shipments ADD COLUMN estimated_delivery TEXT');
-  db.exec('ALTER TABLE shipments ADD COLUMN actual_delivery TEXT');
-  db.exec('ALTER TABLE shipments ADD COLUMN created_at TEXT');
-  db.exec('ALTER TABLE shipments ADD COLUMN updated_at TEXT');
-  logger.info('Added enhanced shipping columns to shipments table');
-} catch (e) {
-  // Columns already exist, ignore error
-}
-
-// Create performance indexes
-try {
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_auctions_status ON auctions(status);
-    CREATE INDEX IF NOT EXISTS idx_auctions_end_time ON auctions(end_time);
-    CREATE INDEX IF NOT EXISTS idx_auctions_product_id ON auctions(product_id);
-    CREATE INDEX IF NOT EXISTS idx_bids_auction_id ON bids(auction_id);
-    CREATE INDEX IF NOT EXISTS idx_bids_user_id ON bids(user_id);
-    CREATE INDEX IF NOT EXISTS idx_bids_created_at ON bids(created_at);
-    CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
-    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-    CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
-    CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
-    CREATE INDEX IF NOT EXISTS idx_products_is_featured ON products(is_featured);
-    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-    CREATE INDEX IF NOT EXISTS idx_shipments_tracking_number ON shipments(tracking_number);
-    CREATE INDEX IF NOT EXISTS idx_shipments_status ON shipments(status);
-    CREATE INDEX IF NOT EXISTS idx_shipments_carrier ON shipments(carrier);
-    CREATE INDEX IF NOT EXISTS idx_shipping_rates_order_id ON shipping_rates(order_id);
-    CREATE INDEX IF NOT EXISTS idx_tracking_events_shipment_id ON tracking_events(shipment_id);
-    CREATE INDEX IF NOT EXISTS idx_shipping_addresses_order_id ON shipping_addresses(order_id);
-  `);
-  logger.info('Database indexes created successfully');
-} catch (e) {
-  logger.warn('Some indexes may already exist:', e.message);
-}
 
 // Security middleware (adjusted for development)
 const isProduction = process.env.NODE_ENV === 'production';
@@ -490,40 +234,33 @@ function allowedBrand(brand) {
 }
 
 // Settings helpers
-function getSetting(key) {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+async function getSetting(key) {
+  const row = await prepare('SELECT value FROM settings WHERE key = $1').get([key]);
   return row ? row.value : null;
 }
-function setSetting(key, value) {
-  const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+async function setSetting(key, value) {
+  const existing = await prepare('SELECT value FROM settings WHERE key = $1').get([key]);
   if (existing) {
-    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(value, key);
+    await prepare('UPDATE settings SET value = $1 WHERE key = $2').run([value, key]);
   } else {
-    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, value);
+    await prepare('INSERT INTO settings (key, value) VALUES ($1, $2)').run([key, value]);
   }
-}
-
-// Seed admin if none
-const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
-if (userCount === 0) {
-  const hash = bcrypt.hashSync('admin123', 10);
-  db.prepare('INSERT INTO users (email, password_hash, name, is_admin) VALUES (?,?,?,1)')
-    .run('admin@example.com', hash, 'Admin');
-  console.log('Seeded admin user: admin@example.com / admin123');
 }
 
 // Auth routes
 app.get('/register', (req, res) => {
   res.render('auth/register', { user: req.session.user, error: null });
 });
-app.post('/register', (req, res) => {
+app.post('/register', async (req, res) => {
   const { email, password, name } = req.body;
   if (!email || !password) return res.render('auth/register', { user: null, error: 'Email and password required' });
   const hash = bcrypt.hashSync(password, 10);
   try {
-    const info = db.prepare('INSERT INTO users (email, password_hash, name) VALUES (?,?,?)')
-      .run(email.trim(), hash, name || null);
-    req.session.user = { id: info.lastInsertRowid, email, name, is_admin: 0 };
+    const result = await query(
+      'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id',
+      [email.trim(), hash, name || null]
+    );
+    req.session.user = { id: result.rows[0].id, email, name, is_admin: 0 };
     res.redirect('/');
   } catch (e) {
     res.render('auth/register', { user: null, error: 'Email already in use' });
@@ -532,9 +269,9 @@ app.post('/register', (req, res) => {
 app.get('/login', (req, res) => {
   res.render('auth/login', { user: req.session.user, error: null });
 });
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  const u = db.prepare('SELECT * FROM users WHERE email = ?').get(email.trim());
+  const u = await prepare('SELECT * FROM users WHERE email = $1').get([email.trim()]);
   if (!u || !bcrypt.compareSync(password, u.password_hash)) {
     return res.render('auth/login', { user: null, error: 'Invalid credentials' });
   }
