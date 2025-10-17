@@ -29,9 +29,10 @@
 </div>
 
 <table class="table">
-  <thead><tr><th>ID</th><th>Brand</th><th>Name</th><th>SKU</th><th>Size</th><th>Featured</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Brand</th><th>Name</th><th>SKU</th><th>Size</th><th>Featured</th><th>Auction</th><th>Actions</th></tr></thead>
   <tbody>
     <% products.forEach(p => { %>
+      <% const activeAuction = p.auctions && p.auctions.find(a => a.status === 'open') %>
       <tr>
         <td><%= p.id %></td>
         <td><%= p.brand %></td>
@@ -43,6 +44,29 @@
             <span class="badge badge-success">✓ Featured</span>
           <% } else { %>
             <span class="badge">Not Featured</span>
+          <% } %>
+        </td>
+        <td class="auction-controls">
+          <% if (activeAuction) { %>
+            <div class="auction-status">
+              <span class="badge badge-auction-active">🔥 Live Auction</span>
+              <button 
+                onclick="endAuction(<%= activeAuction.id %>, <%= p.id %>)" 
+                class="btn btn-small btn-danger auction-btn"
+                title="End Auction">
+                🛑 Stop
+              </button>
+            </div>
+          <% } else { %>
+            <div class="auction-status">
+              <span class="badge badge-auction-inactive">No Auction</span>
+              <button 
+                onclick="showStartAuctionModal(<%= p.id %>)" 
+                class="btn btn-small btn-auction auction-btn"
+                title="Start Auction">
+                ▶️ Start
+              </button>
+            </div>
           <% } %>
         </td>
         <td>
@@ -229,6 +253,77 @@
   color: #065f46;
 }
 
+/* Auction Controls */
+.auction-controls {
+  min-width: 160px;
+}
+.auction-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.badge-auction-active {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  animation: pulse-auction 2s infinite;
+}
+.badge-auction-inactive {
+  background: #f3f4f6;
+  color: #6b7280;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+}
+.auction-btn {
+  min-width: 70px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.btn-auction {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+.btn-auction:hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+.btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+.btn-danger:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+@keyframes pulse-auction {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
 /* Mobile Responsiveness */
 @media (max-width: 768px) {
   .admin-header {
@@ -251,5 +346,242 @@
     padding: 10px 16px;
     font-size: 13px;
   }
+  .auction-controls {
+    min-width: 120px;
+  }
+  .auction-btn {
+    font-size: 10px;
+    padding: 4px 8px;
+    min-width: 60px;
+  }
+}
+
+/* Auction Modal */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+  animation: fadeIn 0.3s ease;
+}
+.modal-content {
+  background-color: #fefefe;
+  margin: 5% auto;
+  padding: 0;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  animation: slideDown 0.3s ease;
+}
+.modal-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 20px;
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+.close {
+  color: white;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: opacity 0.3s ease;
+}
+.close:hover {
+  opacity: 0.7;
+}
+.modal-body {
+  padding: 30px;
+}
+.form-group {
+  margin-bottom: 20px;
+}
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #374151;
+}
+.form-group input, .form-group select {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.3s ease;
+}
+.form-group input:focus, .form-group select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding: 20px 30px 30px;
+}
+.btn-modal {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 14px;
+}
+.btn-modal-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+.btn-modal-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+.btn-modal-secondary {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.btn-modal-secondary:hover {
+  background: #e5e7eb;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideDown {
+  from { 
+    opacity: 0;
+    transform: translateY(-50px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>
+
+<!-- Start Auction Modal -->
+<div id="startAuctionModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>🔥 Start New Auction</h2>
+      <span class="close" onclick="closeStartAuctionModal()">&times;</span>
+    </div>
+    <div class="modal-body">
+      <form id="startAuctionForm">
+        <input type="hidden" id="auctionProductId" name="product_id">
+        <div class="form-group">
+          <label for="startingBid">Starting Bid ($)</label>
+          <input type="number" id="startingBid" name="starting_bid" min="1" step="1" required>
+        </div>
+        <div class="form-group">
+          <label for="duration">Duration</label>
+          <select id="duration" name="duration" required>
+            <option value="1">1 Day</option>
+            <option value="3" selected>3 Days</option>
+            <option value="7">7 Days</option>
+            <option value="14">14 Days</option>
+          </select>
+        </div>
+      </form>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-modal btn-modal-secondary" onclick="closeStartAuctionModal()">Cancel</button>
+      <button type="button" class="btn-modal btn-modal-primary" onclick="startAuction()">🚀 Start Auction</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showStartAuctionModal(productId) {
+  document.getElementById('auctionProductId').value = productId;
+  document.getElementById('startAuctionModal').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeStartAuctionModal() {
+  document.getElementById('startAuctionModal').style.display = 'none';
+  document.body.style.overflow = 'auto';
+  document.getElementById('startAuctionForm').reset();
+}
+
+function startAuction() {
+  const form = document.getElementById('startAuctionForm');
+  const formData = new FormData(form);
+  const data = Object.fromEntries(formData);
+  
+  if (!data.starting_bid || !data.duration) {
+    alert('Please fill in all required fields');
+    return;
+  }
+  
+  fetch('/api/auctions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data)
+  })
+  .then(response => response.json())
+  .then(result => {
+    if (result.success) {
+      alert('✅ Auction started successfully!');
+      closeStartAuctionModal();
+      location.reload();
+    } else {
+      alert('❌ Error: ' + result.error);
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    alert('❌ Failed to start auction');
+  });
+}
+
+function endAuction(auctionId, productId) {
+  if (!confirm('Are you sure you want to end this auction?')) {
+    return;
+  }
+  
+  fetch(`/api/auctions/${auctionId}/end`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    }
+  })
+  .then(response => response.json())
+  .then(result => {
+    if (result.success) {
+      alert('✅ Auction ended successfully!');
+      location.reload();
+    } else {
+      alert('❌ Error: ' + result.error);
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    alert('❌ Failed to end auction');
+  });
+}
+
+// Close modal when clicking outside of it
+window.onclick = function(event) {
+  const modal = document.getElementById('startAuctionModal');
+  if (event.target === modal) {
+    closeStartAuctionModal();
+  }
+}
+</script>

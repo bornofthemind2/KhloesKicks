@@ -1856,7 +1856,14 @@ app.get('/admin', ensureAdmin, (req, res) => res.redirect('/admin/sales'));
 // Minimal pages
 app.get('/products', ensureAdmin, (req, res) => {
   const products = db.prepare('SELECT * FROM products ORDER BY id DESC').all();
-  res.render('admin/products', { user: req.session.user, products });
+  
+  // Get auction data for each product
+  const productsWithAuctions = products.map(product => {
+    const auctions = db.prepare('SELECT * FROM auctions WHERE product_id = ? ORDER BY id DESC').all(product.id);
+    return { ...product, auctions };
+  });
+  
+  res.render('admin/products', { user: req.session.user, products: productsWithAuctions });
 });
 
 // Product edit page
