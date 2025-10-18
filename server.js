@@ -8,6 +8,50 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import { query, prepare, initializeTables, seedAdminUser } from './database.js';
+
+// Compatibility shim: some parts of the codebase use `db.prepare(sql).get(...)` with
+// `?` placeholders (sqlite style). The project uses PostgreSQL via `prepare()` which
+// expects $1, $2 style placeholders. Provide a small `db` wrapper that converts
+// `?` => $n and delegates to the existing `prepare()` helper so we don't need to
+// update many call sites immediately.
+function convertQuestionToDollar(sql) {
+  let i = 0;
+  return sql.replace(/\?/g, () => {
+    i += 1;
+    return `$${i}`;
+  });
+}
+
+const db = {
+  prepare(sql) {
+    const converted = convertQuestionToDollar(sql);
+    const stmt = prepare(converted);
+    return {
+      get(...params) {
+        // support get([params]) or get(p1, p2, ...)
+        let p = [];
+        if (params.length === 1 && Array.isArray(params[0])) p = params[0];
+        else if (params.length === 0) p = [];
+        else p = params;
+        return stmt.get(p);
+      },
+      all(...params) {
+        let p = [];
+        if (params.length === 1 && Array.isArray(params[0])) p = params[0];
+        else if (params.length === 0) p = [];
+        else p = params;
+        return stmt.all(p);
+      },
+      run(...params) {
+        let p = [];
+        if (params.length === 1 && Array.isArray(params[0])) p = params[0];
+        else if (params.length === 0) p = [];
+        else p = params;
+        return stmt.run(p);
+      }
+    };
+  }
+};
 import { parse } from 'csv-parse/sync';
 import dayjs from 'dayjs';
 import Stripe from 'stripe';
@@ -500,6 +544,10 @@ app.post('/checkout/:auctionId', ensureAuth, async (req, res) => {
     logger.error('Stripe checkout error:', e);
     res.status(500).send('Stripe error');
   }
+  } catch (error) {
+    logger.error('Error in checkout:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Buy It Now - Direct purchase bypassing auction
@@ -556,64 +604,78 @@ app.post('/buy-now/:productId', ensureAuth, async (req, res) => {
     logger.error('Buy It Now error:', e);
     res.status(500).send('Stripe error: ' + e.message);
   }
+  } catch (error) {
+    logger.error('Error in buy-now:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Order status pages
-app.get('/order/:id/success', ensureAuth, (req, res) => {
+app.get('/order/:id/success', ensureAuth, async (req, res) => {
   const orderId = Number(req.params.id);
   
-  // Get order details
-  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(orderId, req.session.user.id);
-  if (!order) {
-    return res.status(404).send('Order not found');
-  }
-  
-  // Get product details
-  let product = null;
-  if (order.auction_id) {
-    // Auction-based order
-    const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
-    if (auction) {
-      product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+  try {
+    // Get order details
+    const order = await prepare('SELECT * FROM orders WHERE id = $1 AND user_id = $2').get([orderId, req.session.user.id]);
+    if (!order) {
+      return res.status(404).send('Order not found');
     }
-  } else if (order.product_id) {
-    // Direct buy-now order
-    product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
-  }
-  
-  res.render('order-success', { 
-    user: req.session.user, 
-    order, 
-    product,
-    dayjs
-  });
-});
-
-app.get('/order/:id/cancel', ensureAuth, (req, res) => {
-  const orderId = Number(req.params.id);
-  
-  // Get order details (optional - may not exist if user canceled before order creation)
-  const order = db.prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(orderId, req.session.user.id);
-  
-  // Get product details if order exists
-  let product = null;
-  if (order) {
+    
+    // Get product details
+    let product = null;
     if (order.auction_id) {
-      const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
+      // Auction-based order
+      const auction = await prepare('SELECT * FROM auctions WHERE id = $1').get([order.auction_id]);
       if (auction) {
-        product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+        product = await prepare('SELECT * FROM products WHERE id = $1').get([auction.product_id]);
       }
     } else if (order.product_id) {
-      product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+      // Direct buy-now order
+      product = await prepare('SELECT * FROM products WHERE id = $1').get([order.product_id]);
     }
+    
+    res.render('order-success', { 
+      user: req.session.user, 
+      order, 
+      product,
+      dayjs
+    });
+  } catch (error) {
+    logger.error('Error loading order success page:', error);
+    res.status(500).send('Internal server error');
   }
+});
+
+app.get('/order/:id/cancel', ensureAuth, async (req, res) => {
+  const orderId = Number(req.params.id);
   
-  res.render('order-cancel', { 
-    user: req.session.user, 
-    order, 
-    product,
-    dayjs
-  });
+  try {
+    // Get order details (optional - may not exist if user canceled before order creation)
+    const order = await prepare('SELECT * FROM orders WHERE id = $1 AND user_id = $2').get([orderId, req.session.user.id]);
+    
+    // Get product details if order exists
+    let product = null;
+    if (order) {
+      if (order.auction_id) {
+        const auction = await prepare('SELECT * FROM auctions WHERE id = $1').get([order.auction_id]);
+        if (auction) {
+          product = await prepare('SELECT * FROM products WHERE id = $1').get([auction.product_id]);
+        }
+      } else if (order.product_id) {
+        product = await prepare('SELECT * FROM products WHERE id = $1').get([order.product_id]);
+      }
+    }
+    
+    res.render('order-cancel', { 
+      user: req.session.user, 
+      order, 
+      product,
+      dayjs
+    });
+  } catch (error) {
+    logger.error('Error loading order cancel page:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Razorpay order creation
@@ -645,19 +707,21 @@ app.post('/payment/razorpay/create-order', ensureAuth, async (req, res) => {
     });
 
     // Create pending order in database
-    const orderId = db.prepare(
-      'INSERT INTO orders (auction_id, product_id, user_id, amount, order_type, status, payment_gateway, gateway_transaction_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(
-      auctionId || null,
-      productId || null,
-      userId,
-      amount,
-      auctionId ? 'auction' : 'buy_now',
-      'pending',
-      'razorpay',
-      razorpayOrder.id,
-      new Date().toISOString()
-    ).lastInsertRowid;
+    const orderResult = await query(
+      'INSERT INTO orders (auction_id, product_id, user_id, amount, order_type, status, payment_gateway, gateway_transaction_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
+      [
+        auctionId || null,
+        productId || null,
+        userId,
+        amount,
+        auctionId ? 'auction' : 'buy_now',
+        'pending',
+        'razorpay',
+        razorpayOrder.id,
+        new Date().toISOString()
+      ]
+    );
+    const orderId = orderResult.rows[0].id;
 
     logger.info('Razorpay order created', {
       orderId,
@@ -710,8 +774,8 @@ app.post('/payment/razorpay/verify', ensureAuth, async (req, res) => {
     }
 
     // Update order status
-    const order = db.prepare('SELECT * FROM orders WHERE gateway_transaction_id = ? AND user_id = ?')
-      .get(razorpay_order_id, req.session.user.id);
+    const order = await prepare('SELECT * FROM orders WHERE gateway_transaction_id = $1 AND user_id = $2')
+      .get([razorpay_order_id, req.session.user.id]);
 
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
@@ -722,12 +786,12 @@ app.post('/payment/razorpay/verify', ensureAuth, async (req, res) => {
     const fees = payment.fee ? payment.fee / 100 : 0; // Convert from paise to currency
 
     // Update order with payment confirmation
-    db.prepare(
-      'UPDATE orders SET status = ?, gateway_transaction_id = ?, gateway_fees = ? WHERE id = ?'
-    ).run('paid', razorpay_payment_id, fees, order.id);
+    await prepare(
+      'UPDATE orders SET status = $1, gateway_transaction_id = $2, gateway_fees = $3 WHERE id = $4'
+    ).run(['paid', razorpay_payment_id, fees, order.id]);
 
     // Update gateway analytics
-    updateGatewayAnalytics('razorpay', order.amount, fees, true);
+    await updateGatewayAnalytics('razorpay', order.amount, fees, true);
 
     logger.info('Razorpay payment verified', {
       orderId: order.id,
@@ -748,32 +812,32 @@ app.post('/payment/razorpay/verify', ensureAuth, async (req, res) => {
 });
 
 // Gateway analytics helper function
-function updateGatewayAnalytics(gatewayName, amount, fees, success) {
+async function updateGatewayAnalytics(gatewayName, amount, fees, success) {
   try {
     const today = new Date().toISOString().split('T')[0];
     
     // Get existing analytics for today
-    const existing = db.prepare(
-      'SELECT * FROM gateway_analytics WHERE gateway_name = ? AND date = ?'
-    ).get(gatewayName, today);
+    const existing = await prepare(
+      'SELECT * FROM gateway_analytics WHERE gateway_name = $1 AND date = $2'
+    ).get([gatewayName, today]);
 
     if (existing) {
       // Update existing record
       const newCount = existing.transaction_count + 1;
-      const newVolume = existing.total_volume + amount;
+      const newVolume = parseFloat(existing.total_volume) + amount;
       const newSuccessRate = success 
         ? ((existing.success_rate * existing.transaction_count) + 100) / newCount
         : (existing.success_rate * existing.transaction_count) / newCount;
-      const newAvgFee = ((existing.average_fee * existing.transaction_count) + fees) / newCount;
+      const newAvgFee = ((parseFloat(existing.average_fee) * existing.transaction_count) + fees) / newCount;
 
-      db.prepare(
-        'UPDATE gateway_analytics SET transaction_count = ?, success_rate = ?, average_fee = ?, total_volume = ? WHERE id = ?'
-      ).run(newCount, newSuccessRate, newAvgFee, newVolume, existing.id);
+      await prepare(
+        'UPDATE gateway_analytics SET transaction_count = $1, success_rate = $2, average_fee = $3, total_volume = $4 WHERE id = $5'
+      ).run([newCount, newSuccessRate, newAvgFee, newVolume, existing.id]);
     } else {
       // Create new record
-      db.prepare(
-        'INSERT INTO gateway_analytics (gateway_name, transaction_count, success_rate, average_fee, total_volume, date) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(gatewayName, 1, success ? 100 : 0, fees, amount, today);
+      await prepare(
+        'INSERT INTO gateway_analytics (gateway_name, transaction_count, success_rate, average_fee, total_volume, date) VALUES ($1, $2, $3, $4, $5, $6)'
+      ).run([gatewayName, 1, success ? 100 : 0, fees, amount, today]);
     }
   } catch (error) {
     logger.error('Failed to update gateway analytics', { error: error.message });
@@ -781,7 +845,7 @@ function updateGatewayAnalytics(gatewayName, amount, fees, success) {
 }
 
 // Stripe webhook (set STRIPE_WEBHOOK_SECRET)
-app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), (req, res) => {
+app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return res.sendStatus(200);
   const sig = req.headers['stripe-signature'];
   let event;
@@ -792,11 +856,12 @@ app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), (req, 
     return res.sendStatus(400);
   }
   if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const order = db.prepare('SELECT * FROM orders WHERE stripe_session_id = ?').get(session.id);
-    if (order) {
-      db.prepare('UPDATE orders SET status = ?, payment_intent_id = ? WHERE id = ?')
-        .run('paid', session.payment_intent || null, order.id);
+    try {
+      const session = event.data.object;
+      const order = await prepare('SELECT * FROM orders WHERE stripe_session_id = $1').get([session.id]);
+      if (order) {
+        await prepare('UPDATE orders SET status = $1, payment_intent_id = $2 WHERE id = $3')
+          .run(['paid', session.payment_intent || null, order.id]);
 
       // Capture shipping details into a shipment record (if provided by Checkout)
       const ship = session.shipping_details || session.customer_details || null;
@@ -804,12 +869,12 @@ app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), (req, 
         const addr = ship.address;
         
         // Store shipping address
-        db.prepare(`
+        await prepare(`
           INSERT INTO shipping_addresses (
             order_id, type, name, address_line1, address_line2, 
             city, state, postal_code, country, phone, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `).run([
           order.id,
           'to',
           ship.name || 'Customer',
@@ -821,7 +886,7 @@ app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), (req, 
           addr.country || 'US',
           ship.phone || null,
           dayjs().toISOString()
-        );
+        ]);
         
         // Auto-generate shipping label if enabled
         if (process.env.AUTO_GENERATE_LABELS === 'true') {
@@ -838,6 +903,9 @@ app.post('/webhook/stripe', bodyParser.raw({ type: 'application/json' }), (req, 
         }
       }
     }
+    } catch (error) {
+      logger.error('Error processing Stripe webhook:', error);
+    }
   }
   res.sendStatus(200);
 });
@@ -848,14 +916,14 @@ async function autoGenerateShippingLabel(orderId) {
     logger.info('Starting auto shipping label generation', { orderId });
     
     // Check if shipment already exists
-    const existingShipment = db.prepare('SELECT id FROM shipments WHERE order_id = ?').get(orderId);
+    const existingShipment = await prepare('SELECT id FROM shipments WHERE order_id = $1').get([orderId]);
     if (existingShipment) {
       logger.info('Shipment already exists, skipping auto-generation', { orderId });
       return;
     }
     
     // Get order details
-    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND status = \'paid\'').get(orderId);
+    const order = await prepare('SELECT * FROM orders WHERE id = $1 AND status = $2').get([orderId, 'paid']);
     if (!order) {
       throw new Error('Order not found or not paid');
     }
@@ -863,12 +931,12 @@ async function autoGenerateShippingLabel(orderId) {
     // Get product details
     let product = null;
     if (order.auction_id) {
-      const auction = db.prepare('SELECT * FROM auctions WHERE id = ?').get(order.auction_id);
+      const auction = await prepare('SELECT * FROM auctions WHERE id = $1').get([order.auction_id]);
       if (auction) {
-        product = db.prepare('SELECT * FROM products WHERE id = ?').get(auction.product_id);
+        product = await prepare('SELECT * FROM products WHERE id = $1').get([auction.product_id]);
       }
     } else if (order.product_id) {
-      product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+      product = await prepare('SELECT * FROM products WHERE id = $1').get([order.product_id]);
     }
     
     if (!product) {
@@ -876,12 +944,12 @@ async function autoGenerateShippingLabel(orderId) {
     }
     
     // Get shipping address
-    const shippingAddress = db.prepare(`
+    const shippingAddress = await prepare(`
       SELECT * FROM shipping_addresses 
-      WHERE order_id = ? AND type = 'to' 
+      WHERE order_id = $1 AND type = $2 
       ORDER BY created_at DESC 
       LIMIT 1
-    `).get(orderId);
+    `).get([orderId, 'to']);
     
     if (!shippingAddress) {
       throw new Error('No shipping address found');
@@ -919,13 +987,13 @@ async function autoGenerateShippingLabel(orderId) {
     const labelResult = await shippingManager.createOptimalShipment(shipmentDetails);
     
     // Create shipment record
-    const shipmentId = db.prepare(`
+    const shipmentResult = await query(`
       INSERT INTO shipments (
         order_id, carrier, service_code, tracking_number, 
         shipping_cost, weight, status, to_name, to_address1, to_address2, 
         to_city, to_state, to_zip, to_country, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id
+    `, [
       orderId,
       labelResult.carrier,
       'AUTO',
@@ -942,20 +1010,21 @@ async function autoGenerateShippingLabel(orderId) {
       toAddress.country,
       dayjs().toISOString(),
       dayjs().toISOString()
-    ).lastInsertRowid;
+    ]);
+    const shipmentId = shipmentResult.rows[0].id;
     
     // Store shipping label if available
     if (labelResult.labelUrl) {
-      db.prepare(`
+      await prepare(`
         INSERT INTO shipping_labels (shipment_id, carrier, label_url, label_format, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(
+        VALUES ($1, $2, $3, $4, $5)
+      `).run([
         shipmentId,
         labelResult.carrier,
         labelResult.labelUrl,
         'PDF',
         dayjs().toISOString()
-      );
+      ]);
     }
     
     logger.info('Auto shipping label generated successfully', {
@@ -969,7 +1038,7 @@ async function autoGenerateShippingLabel(orderId) {
     // Send shipping notification email (if email is configured)
     if (process.env.SMTP_HOST && process.env.FROM_EMAIL) {
       try {
-        const user = db.prepare('SELECT email, name FROM users WHERE id = ?').get(order.user_id);
+        const user = await prepare('SELECT email, name FROM users WHERE id = $1').get([order.user_id]);
         if (user?.email) {
           await sendShippingNotification({
             orderId,
@@ -1068,7 +1137,7 @@ async function getStripeConnectAccountDetails(accountId) {
 
 // Admin route to test Stripe Connect integration
 app.get('/admin/connect/test', ensureAdmin, async (req, res) => {
-  const connectedId = getSetting('stripe_connected_account_id');
+  const connectedId = await getSetting('stripe_connected_account_id');
   
   if (!connectedId) {
     return res.json({ 
@@ -1108,8 +1177,8 @@ app.get('/admin/connect/test', ensureAdmin, async (req, res) => {
 
 // Stripe Connect onboarding (optional)
 app.get('/admin/connect', ensureAdmin, async (req, res) => {
-  const connectedId = getSetting('stripe_connected_account_id');
-  const connectionData = getSetting('stripe_connection_data');
+  const connectedId = await getSetting('stripe_connected_account_id');
+  const connectionData = await getSetting('stripe_connection_data');
   const clientId = process.env.STRIPE_CLIENT_ID || 'acct_1SHckxHd2ZDTrw8M';
   
   let parsedConnectionData = null;
@@ -1198,8 +1267,8 @@ app.get('/admin/connect/callback', ensureAdmin, async (req, res) => {
       };
       
       // Save to settings
-      setSetting('stripe_connected_account_id', token.stripe_user_id);
-      setSetting('stripe_connection_data', JSON.stringify(connectionData));
+      await setSetting('stripe_connected_account_id', token.stripe_user_id);
+      await setSetting('stripe_connection_data', JSON.stringify(connectionData));
       
       logger.info('Stripe Connect successful', {
         accountId: token.stripe_user_id,
@@ -1222,7 +1291,7 @@ app.get('/admin/connect/callback', ensureAdmin, async (req, res) => {
 
 app.post('/admin/connect/disconnect', ensureAdmin, async (req, res) => {
   // For a full disconnect, you can deauthorize via stripe.oauth.deauthorize
-  const connectedId = getSetting('stripe_connected_account_id');
+  const connectedId = await getSetting('stripe_connected_account_id');
   const clientId = process.env.STRIPE_CLIENT_ID || 'acct_1SHckxHd2ZDTrw8M';
   
   if (connectedId && clientId) {
@@ -1245,8 +1314,8 @@ app.post('/admin/connect/disconnect', ensureAdmin, async (req, res) => {
   }
   
   // Clear all Stripe connection settings
-  setSetting('stripe_connected_account_id', '');
-  setSetting('stripe_connection_data', '');
+  await setSetting('stripe_connected_account_id', '');
+  await setSetting('stripe_connection_data', '');
   
   res.redirect('/admin/connect?disconnected=1');
 });
@@ -1255,74 +1324,91 @@ app.post('/admin/connect/disconnect', ensureAdmin, async (req, res) => {
 app.get('/admin/import', ensureAdmin, (req, res) => {
   res.render('admin/import', { user: req.session.user, error: null, success: null });
 });
-app.post('/admin/import', ensureAdmin, upload.single('csv'), (req, res) => {
+app.post('/admin/import', ensureAdmin, upload.single('csv'), async (req, res) => {
   if (!req.file) return res.render('admin/import', { user: req.session.user, error: 'No file', success: null });
-  const buf = fs.readFileSync(req.file.path);
-  const rows = parse(buf, { columns: true, skip_empty_lines: true, relax_column_count: true, relax_quotes: true, trim: true, bom: true });
-  let added = 0;
-  const insert = db.prepare('INSERT INTO products (brand, name, sku, size, description, image_url, highest_market_price) VALUES (?,?,?,?,?,?,?)');
-  for (const r of rows) {
-    const brand = (r.brand || '').trim();
-    if (!allowedBrand(brand)) continue;
-    insert.run(
-      brand,
-      (r.name || '').trim(),
-      (r.sku || '').trim(),
-      (r.size || '').trim(),
-      (r.description || '').trim(),
-      (r.image_url || '').trim(),
-      Number(r.highest_market_price || 0)
-    );
-    added++;
+  try {
+    const buf = fs.readFileSync(req.file.path);
+    const rows = parse(buf, { columns: true, skip_empty_lines: true, relax_column_count: true, relax_quotes: true, trim: true, bom: true });
+    let added = 0;
+    
+    for (const r of rows) {
+      const brand = (r.brand || '').trim();
+      if (!allowedBrand(brand)) continue;
+      
+      await prepare('INSERT INTO products (brand, name, sku, size, description, image_url, highest_market_price) VALUES ($1, $2, $3, $4, $5, $6, $7)').run([
+        brand,
+        (r.name || '').trim(),
+        (r.sku || '').trim(),
+        (r.size || '').trim(),
+        (r.description || '').trim(),
+        (r.image_url || '').trim(),
+        Number(r.highest_market_price || 0)
+      ]);
+      added++;
+    }
+    res.render('admin/import', { user: req.session.user, error: null, success: `Imported ${added} products` });
+  } catch (error) {
+    logger.error('Import error:', error);
+    res.render('admin/import', { user: req.session.user, error: 'Import failed: ' + error.message, success: null });
   }
-  res.render('admin/import', { user: req.session.user, error: null, success: `Imported ${added} products` });
 });
 
 // Admin: create auction for a product
-app.post('/admin/auctions', ensureAdmin, (req, res) => {
-  const { product_id, starting_bid } = req.body;
+app.post('/admin/auctions', ensureAdmin, async (req, res) => {
+  try {
+    const { product_id, starting_bid } = req.body;
 
-  const product = db.prepare('SELECT id FROM products WHERE id = ?').get(Number(product_id));
-  if (!product) {
-    return res.status(404).send('Product not found');
+    const product = await prepare('SELECT id FROM products WHERE id = $1').get([Number(product_id)]);
+    if (!product) {
+      return res.status(404).send('Product not found');
+    }
+
+    const start = dayjs();
+    const end = start.add(10, 'day');
+    await prepare('INSERT INTO auctions (product_id, start_time, end_time, starting_bid, status) VALUES ($1, $2, $3, $4, $5)')
+      .run([Number(product_id), start.toISOString(), end.toISOString(), Number(starting_bid || 0), 'open']);
+    res.redirect('/');
+  } catch (error) {
+    logger.error('Error creating auction:', error);
+    res.status(500).send('Internal server error');
   }
-
-  const start = dayjs();
-  const end = start.add(10, 'day');
-  db.prepare('INSERT INTO auctions (product_id, start_time, end_time, starting_bid, status) VALUES (?,?,?,?,?)')
-    .run(Number(product_id), start.toISOString(), end.toISOString(), Number(starting_bid || 0), 'open');
-  res.redirect('/');
 });
 
 // Admin sales page
-app.get('/admin/sales', ensureAdmin, (req, res) => {
-  const orders = db.prepare(`
-    SELECT o.*, a.id as auction_id, p.name as product_name, p.brand, u.email as buyer_email
-    FROM orders o
-    JOIN auctions a ON a.id = o.auction_id
-    JOIN products p ON p.id = a.product_id
-    JOIN users u ON u.id = o.user_id
-    ORDER BY datetime(o.created_at) DESC
-  `).all();
-  const openBids = db.prepare(`
-    SELECT a.id as auction_id, p.name as product_name, p.brand, a.current_bid, u.email as leader_email, a.end_time
-    FROM auctions a
-    JOIN products p ON p.id = a.product_id
-    LEFT JOIN users u ON u.id = a.current_bid_user_id
-    WHERE a.status = 'open'
-    ORDER BY datetime(a.end_time) ASC
-  `).all();
-  res.render('admin/sales', { user: req.session.user, orders, openBids, dayjs });
+app.get('/admin/sales', ensureAdmin, async (req, res) => {
+  try {
+    const orders = await prepare(`
+      SELECT o.*, a.id as auction_id, p.name as product_name, p.brand, u.email as buyer_email
+      FROM orders o
+      JOIN auctions a ON a.id = o.auction_id
+      JOIN products p ON p.id = a.product_id
+      JOIN users u ON u.id = o.user_id
+      ORDER BY o.created_at DESC
+    `).all();
+    const openBids = await prepare(`
+      SELECT a.id as auction_id, p.name as product_name, p.brand, a.current_bid, u.email as leader_email, a.end_time
+      FROM auctions a
+      JOIN products p ON p.id = a.product_id
+      LEFT JOIN users u ON u.id = a.current_bid_user_id
+      WHERE a.status = 'open'
+      ORDER BY a.end_time ASC
+    `).all();
+    res.render('admin/sales', { user: req.session.user, orders, openBids, dayjs });
+  } catch (error) {
+    logger.error('Error loading admin sales:', error);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Admin payment analytics page
-app.get('/admin/analytics', ensureAdmin, (req, res) => {
+app.get('/admin/analytics', ensureAdmin, async (req, res) => {
   try {
     // Get gateway analytics for last 30 days
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
     
-    const analytics = db.prepare(`
+    const analytics = await prepare(`
       SELECT 
         gateway_name,
         SUM(transaction_count) as total_transactions,
@@ -1331,13 +1417,13 @@ app.get('/admin/analytics', ensureAdmin, (req, res) => {
         SUM(total_volume) as total_volume,
         MAX(date) as last_transaction_date
       FROM gateway_analytics 
-      WHERE date >= ?
+      WHERE date >= $1
       GROUP BY gateway_name
       ORDER BY total_volume DESC
-    `).all(thirtyDaysAgo.toISOString().split('T')[0]);
+    `).all([thirtyDaysAgoStr]);
 
     // Get daily analytics for charts
-    const dailyAnalytics = db.prepare(`
+    const dailyAnalytics = await prepare(`
       SELECT 
         date,
         gateway_name,
@@ -1345,12 +1431,12 @@ app.get('/admin/analytics', ensureAdmin, (req, res) => {
         success_rate,
         total_volume
       FROM gateway_analytics
-      WHERE date >= ?
+      WHERE date >= $1
       ORDER BY date DESC, gateway_name
-    `).all(thirtyDaysAgo.toISOString().split('T')[0]);
+    `).all([thirtyDaysAgoStr]);
 
     // Get recent orders by gateway
-    const recentOrders = db.prepare(`
+    const recentOrders = await prepare(`
       SELECT 
         o.id,
         o.payment_gateway,
@@ -1365,10 +1451,10 @@ app.get('/admin/analytics', ensureAdmin, (req, res) => {
       LEFT JOIN users u ON u.id = o.user_id
       LEFT JOIN auctions a ON a.id = o.auction_id
       LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
-      WHERE o.created_at >= datetime('now', '-30 days')
+      WHERE o.created_at >= $1::timestamp
       ORDER BY o.created_at DESC
       LIMIT 100
-    `).all();
+    `).all([thirtyDaysAgoStr]);
 
     res.render('admin/analytics', { 
       user: req.session.user, 

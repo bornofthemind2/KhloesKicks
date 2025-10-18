@@ -5,31 +5,33 @@ body { font-family: Arial, sans-serif; margin: 0; background: #fafafa; color: #2
   justify-content: space-between; 
   align-items: center; 
   padding: 12px 16px; 
-  background: #ffffff; 
-  color: #1a202c; 
-  border-bottom: 1px solid #e2e8f0;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  /* Python-inspired gradient (blue -> yellow) */
+  background: linear-gradient(90deg, #306998 0%, #FFD43B 100%);
+  color: #ffffff; 
+  border-bottom: none;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.12);
 }
 .topbar a { 
-  color: #374151; 
+  color: #ffffff; 
   margin-left: 12px; 
   text-decoration: none; 
-  font-weight: 500;
-  transition: color 0.3s ease;
+  font-weight: 600;
+  transition: color 0.2s ease;
 }
 .topbar a:hover {
-  color: #667eea;
+  /* darker text on hover for contrast against yellow */
+  color: rgba(0,0,0,0.85);
 }
 .brand { 
   font-weight: bold; 
   display: flex; 
   align-items: center; 
   gap: 10px; 
-  color: #1a202c !important;
+  color: #ffffff !important;
   font-size: 1.25rem;
 }
 .brand:hover {
-  color: #667eea !important;
+  color: rgba(0,0,0,0.85) !important;
 }
 .logo { height: 40px; width: auto; }
 

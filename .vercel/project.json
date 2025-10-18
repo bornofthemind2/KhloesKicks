@@ -1,0 +1,10 @@
+{
+  "projectId": "prj_sneaker-auction",
+  "orgId": "your-org-id",
+  "settings": {
+    "framework": "node",
+    "buildCommand": "npm install",
+    "outputDirectory": ".",
+    "devCommand": "npm run dev"
+  }
+}

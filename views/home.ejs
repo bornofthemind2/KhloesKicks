@@ -76,65 +76,7 @@
   </section>
 <% } %>
 
-<!-- Popular Brands Section -->
-<% if (popularBrands && popularBrands.length > 0) { %>
-<section class="brands-section">
-  <div class="brands-header">
-    <h2 class="brands-title">🔥 Popular Brands</h2>
-    <p class="brands-subtitle">Discover our most sought-after sneaker brands</p>
-  </div>
-  
-  <div class="brands-grid">
-    <% popularBrands.forEach(product => { %>
-      <div class="brand-card">
-        <div class="brand-image-container">
-          <% if (product.image_url) { %>
-            <img src="<%= product.image_url %>" class="brand-image" alt="<%= product.name %>" />
-          <% } else { %>
-            <div class="brand-placeholder">
-              <span class="placeholder-text">📷</span>
-            </div>
-          <% } %>
-          <div class="brand-overlay">
-            <div class="brand-logo">
-              <%= product.brand %>
-            </div>
-          </div>
-        </div>
-        
-        <div class="brand-content">
-          <div class="brand-header">
-            <span class="brand-name"><%= product.brand %></span>
-            <span class="product-count"><%= product.product_count %> items</span>
-          </div>
-          
-          <h3 class="product-showcase"><%= product.name %></h3>
-          
-          <div class="brand-stats">
-            <div class="brand-stat">
-              <span class="stat-label">Market Value</span>
-              <span class="stat-value">$<%= product.highest_market_price %></span>
-            </div>
-            <% if (product.size) { %>
-            <div class="brand-stat">
-              <span class="stat-label">Size</span>
-              <span class="stat-value"><%= product.size %></span>
-            </div>
-            <% } %>
-          </div>
-          
-          <div class="brand-actions">
-            <a href="/?brand=<%= encodeURIComponent(product.brand) %>" class="btn-brand">
-              <span class="btn-brand-icon">👟</span>
-              <span class="btn-brand-text">Shop <%= product.brand %></span>
-            </a>
-          </div>
-        </div>
-      </div>
-    <% }) %>
-  </div>
-</section>
-<% } %>
+<!-- Popular Brands Section (moved to after auctions) -->
 
 <section class="auctions-section">
   <% if (brandFilter) { %>
@@ -652,3 +594,64 @@
   }
 }
 </style>
+
+<!-- Re-insert Popular Brands Section here so it appears after auctions -->
+<% if (popularBrands && popularBrands.length > 0) { %>
+<section class="brands-section">
+  <div class="brands-header">
+    <h2 class="brands-title">🔥 Popular Brands</h2>
+    <p class="brands-subtitle">Discover our most sought-after sneaker brands</p>
+  </div>
+  
+  <div class="brands-grid">
+    <% popularBrands.forEach(product => { %>
+      <div class="brand-card">
+        <div class="brand-image-container">
+          <% if (product.image_url) { %>
+            <img src="<%= product.image_url %>" class="brand-image" alt="<%= product.name %>" />
+          <% } else { %>
+            <div class="brand-placeholder">
+              <span class="placeholder-text">📷</span>
+            </div>
+          <% } %>
+          <div class="brand-overlay">
+            <div class="brand-logo">
+              <%= product.brand %>
+            </div>
+          </div>
+        </div>
+        
+        <div class="brand-content">
+          <div class="brand-header">
+            <span class="brand-name"><%= product.brand %></span>
+            <span class="product-count"><%= product.product_count %> items</span>
+          </div>
+          
+          <h3 class="product-showcase"><%= product.name %></h3>
+          
+          <div class="brand-stats">
+            <div class="brand-stat">
+              <span class="stat-label">Market Value</span>
+              <span class="stat-value">$<%= product.highest_market_price %></span>
+            </div>
+            <% if (product.size) { %>
+            <div class="brand-stat">
+              <span class="stat-label">Size</span>
+              <span class="stat-value"><%= product.size %></span>
+            </div>
+            <% } %>
+          </div>
+          
+          <div class="brand-actions">
+            <a href="/?brand=<%= encodeURIComponent(product.brand) %>" class="btn-brand">
+              <span class="btn-brand-icon">👟</span>
+              <span class="btn-brand-text">Shop <%= product.brand %></span>
+            </a>
+          </div>
+        </div>
+      </div>
+    <% }) %>
+  </div>
+</section>
+<% } %>
+
