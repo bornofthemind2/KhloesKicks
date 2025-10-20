@@ -1470,9 +1470,9 @@ app.get('/admin/analytics', ensureAdmin, async (req, res) => {
 });
 
 // CSV Export Products
-app.get('/admin/export/products', ensureAdmin, (req, res) => {
+app.get('/admin/export/products', ensureAdmin, async (req, res) => {
   try {
-    const products = db.prepare(`
+    const result = await query(`
       SELECT 
         id,
         brand,
@@ -1486,7 +1486,9 @@ app.get('/admin/export/products', ensureAdmin, (req, res) => {
         buy_it_now_price
       FROM products 
       ORDER BY brand, name
-    `).all();
+    `);
+    
+    const products = result.rows;
 
     // Convert to CSV format
     const csvHeaders = ['id', 'brand', 'name', 'sku', 'size', 'description', 'image_url', 'highest_market_price', 'is_featured', 'buy_it_now_price'];
@@ -1526,9 +1528,9 @@ app.get('/admin/export/products', ensureAdmin, (req, res) => {
 });
 
 // CSV Export Orders/Sales
-app.get('/admin/export/orders', ensureAdmin, (req, res) => {
+app.get('/admin/export/orders', ensureAdmin, async (req, res) => {
   try {
-    const orders = db.prepare(`
+    const result = await query(`
       SELECT 
         o.id,
         o.order_type,
@@ -1549,8 +1551,10 @@ app.get('/admin/export/orders', ensureAdmin, (req, res) => {
       LEFT JOIN products p ON p.id = COALESCE(a.product_id, o.product_id)
       LEFT JOIN users u ON u.id = o.user_id
       LEFT JOIN shipments s ON s.order_id = o.id
-      ORDER BY datetime(o.created_at) DESC
-    `).all();
+      ORDER BY o.created_at DESC
+    `);
+    
+    const orders = result.rows;
 
     // Convert to CSV format
     const csvHeaders = ['id', 'order_type', 'brand', 'product_name', 'sku', 'size', 'amount', 'status', 'buyer_email', 'created_at', 'stripe_session_id', 'shipping_carrier', 'tracking_number', 'shipping_status'];
@@ -1590,9 +1594,9 @@ app.get('/admin/export/orders', ensureAdmin, (req, res) => {
 });
 
 // CSV Export Auctions
-app.get('/admin/export/auctions', ensureAdmin, (req, res) => {
+app.get('/admin/export/auctions', ensureAdmin, async (req, res) => {
   try {
-    const auctions = db.prepare(`
+    const result = await query(`
       SELECT 
         a.id,
         p.brand,
@@ -1609,8 +1613,10 @@ app.get('/admin/export/auctions', ensureAdmin, (req, res) => {
       FROM auctions a
       JOIN products p ON p.id = a.product_id
       LEFT JOIN users u ON u.id = a.current_bid_user_id
-      ORDER BY datetime(a.created_at) DESC
-    `).all();
+      ORDER BY a.created_at DESC
+    `);
+    
+    const auctions = result.rows;
 
     // Convert to CSV format
     const csvHeaders = ['id', 'brand', 'product_name', 'sku', 'size', 'start_time', 'end_time', 'starting_bid', 'current_bid', 'status', 'current_bidder_email', 'highest_market_price'];
