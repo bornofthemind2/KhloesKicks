@@ -15,8 +15,10 @@ const { Client } = pg;
 // Database configuration
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
+  // SQLite doesn't need port, user, password for local file
+  // These are kept for compatibility but not used
   port: process.env.DB_PORT || 5432,
-  user: process.env.DB_USER || 'postgres', 
+  user: process.env.DB_USER || '',
   password: process.env.DB_PASSWORD || '',
   // Don't specify database initially - we'll create it
 };

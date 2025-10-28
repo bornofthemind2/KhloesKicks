@@ -77,7 +77,7 @@ The following areas still need to be converted from SQLite to PostgreSQL syntax:
 1. Install PostgreSQL locally
 2. Set environment variables:
    ```
-   DATABASE_URL=postgresql://username:password@localhost:5432/sneaker_auction
+   DATABASE_URL=./sneaker_auction.db
    NODE_ENV=development
    ```
 
