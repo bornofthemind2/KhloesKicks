@@ -9,20 +9,13 @@ services:
     autoDeploy: false
     preDeployCommand: "echo 'Pre-deploy check complete'"
     postDeployCommand: "echo 'Deployment completed successfully'"
-    dependsOn:
-      - khloes-kicks-db
-    envVars:
-      - key: WAIT_FOR_DB
-        value: "true"
     envVars:
       - key: NODE_ENV
         value: production
       - key: SESSION_SECRET
         generateValue: true
       - key: DATABASE_URL
-        fromDatabase:
-          name: khloes-kicks-db
-          property: connectionString
+        value: "/opt/render/project/src/sneaker_auction.db"
       - key: SHIP_FROM_NAME
         value: "Khloe's Kicks"
       - key: SHIP_FROM_ADDRESS1
@@ -35,22 +28,3 @@ services:
         value: "90210"
       - key: SHIP_FROM_COUNTRY
         value: "US"
-      - key: DATABASE_SSL_CA
-        fromDatabase:
-          name: khloes-kicks-db
-          property: ca
-      - key: DATABASE_SSL_CERT
-        fromDatabase:
-          name: khloes-kicks-db
-          property: cert
-      - key: DATABASE_SSL_KEY
-        fromDatabase:
-          name: khloes-kicks-db
-          property: key
-
-  - type: pgsql
-    name: khloes-kicks-db
-    databaseName: sneaker_auction
-    user: sneaker_user
-    plan: free
-    ipAllowList: []  # Allow all connections for web service

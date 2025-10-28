@@ -139,9 +139,9 @@ const strictLimiter = rateLimit({
 });
 
 // Health check for database connectivity
-async function checkDatabaseHealth() {
+function checkDatabaseHealth() {
   try {
-    await query('SELECT 1');
+    query('SELECT 1');
     return true;
   } catch (error) {
     logger.warn('Database health check failed:', error.message);
@@ -150,17 +150,19 @@ async function checkDatabaseHealth() {
 }
 
 // Initialize PostgreSQL database with retry logic
-async function initializeDatabase(maxRetries = 20, retryDelay = 10000) {
+async function initializeDatabase(maxRetries = process.env.NODE_ENV === 'production' ? 20 : 5, retryDelay = process.env.NODE_ENV === 'production' ? 10000 : 2000) {
   let retries = 0;
 
   while (retries < maxRetries) {
     try {
       logger.info(`Attempting database initialization (attempt ${retries + 1}/${maxRetries})`);
 
-      // First check if database is accessible
-      const isHealthy = await checkDatabaseHealth();
-      if (!isHealthy) {
-        throw new Error('Database health check failed');
+      // First check if database is accessible (skip in development if database might not be running)
+      if (process.env.NODE_ENV === 'production') {
+        const isHealthy = await checkDatabaseHealth();
+        if (!isHealthy) {
+          throw new Error('Database health check failed');
+        }
       }
 
       await initializeTables();
@@ -173,7 +175,12 @@ async function initializeDatabase(maxRetries = 20, retryDelay = 10000) {
 
       if (retries >= maxRetries) {
         logger.error('Failed to initialize database after maximum retries:', error);
-        process.exit(1);
+        if (process.env.NODE_ENV === 'production') {
+          process.exit(1);
+        } else {
+          logger.warn('Continuing without database in development mode. Make sure your local database is running.');
+          return;
+        }
       }
 
       logger.info(`Retrying database initialization in ${retryDelay}ms...`);
@@ -182,8 +189,8 @@ async function initializeDatabase(maxRetries = 20, retryDelay = 10000) {
   }
 }
 
-// Wait for database to be ready if configured
-if (process.env.WAIT_FOR_DB === 'true') {
+// Wait for database to be ready if configured (only in production)
+if (process.env.WAIT_FOR_DB === 'true' && process.env.NODE_ENV === 'production') {
   logger.info('Waiting for database to be ready...');
   let dbReady = false;
   let waitAttempts = 0;
@@ -191,7 +198,7 @@ if (process.env.WAIT_FOR_DB === 'true') {
 
   while (!dbReady && waitAttempts < maxWaitAttempts) {
     try {
-      await query('SELECT 1');
+      query('SELECT 1');
       dbReady = true;
       logger.info('Database is ready');
     } catch (error) {
@@ -2848,7 +2855,25 @@ app.get('/my-orders', ensureAuth, (req, res) => {
   }
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server with port conflict handling for development
+const server = app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+});
+
+// Handle port conflicts gracefully in development
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(`Port ${PORT} is already in use. Please:`);
+      console.error(`1. Stop the other server using: taskkill /f /im node.exe`);
+      console.error(`2. Or use a different port: set PORT=3001 && npm start`);
+      console.error(`3. Check what's using the port: netstat -ano | findstr :${PORT}`);
+    } else {
+      console.error(`Port ${PORT} is already in use in production environment`);
+    }
+    process.exit(1);
+  } else {
+    console.error('Server error:', error);
+    process.exit(1);
+  }
 });
