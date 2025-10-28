@@ -31,53 +31,98 @@ const dbConfig = {
   database: process.env.DB_NAME || 'sneaker_auction',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || '',
-  // SSL configuration for production
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  // Connection pool settings
-  max: 20,
+  // SSL configuration for production - more robust for Render
+  ssl: process.env.NODE_ENV === 'production' ? {
+    rejectUnauthorized: false,
+    // Additional SSL options for better compatibility
+    ca: process.env.DATABASE_SSL_CA,
+    cert: process.env.DATABASE_SSL_CERT,
+    key: process.env.DATABASE_SSL_KEY
+  } : false,
+  // Connection pool settings - adjusted for Render
+  max: process.env.NODE_ENV === 'production' ? 10 : 20,
+  min: process.env.NODE_ENV === 'production' ? 2 : 0,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: process.env.NODE_ENV === 'production' ? 10000 : 2000,
+  acquireTimeoutMillis: process.env.NODE_ENV === 'production' ? 60000 : 60000,
 };
 
 // Create connection pool
 const pool = new Pool(dbConfig);
 
 // Handle pool events
-pool.on('connect', () => {
+pool.on('connect', (client) => {
   logger.info('Connected to PostgreSQL database');
-});
-
-pool.on('error', (err) => {
-  logger.error('PostgreSQL pool error:', err);
-});
-
-// Database query wrapper with error handling
-export async function query(text, params = []) {
-  const client = await pool.connect();
-  try {
-    const start = Date.now();
-    const res = await client.query(text, params);
-    const duration = Date.now() - start;
-    
-    if (duration > 1000) {
-      logger.warn('Slow query detected', { 
-        query: text.substring(0, 100), 
-        duration,
-        rows: res.rowCount 
-      });
-    }
-    
-    return res;
-  } catch (error) {
-    logger.error('Database query error:', { 
-      error: error.message,
-      query: text.substring(0, 100),
-      params: params.slice(0, 5) // Only log first 5 params for security
-    });
-    throw error;
-  } finally {
-    client.release();
+  // Set statement timeout for production
+  if (process.env.NODE_ENV === 'production') {
+    client.query('SET statement_timeout = 30000'); // 30 seconds
   }
+});
+
+pool.on('error', (err, client) => {
+  logger.error('PostgreSQL pool error:', err);
+  // In production, try to reconnect on pool errors
+  if (process.env.NODE_ENV === 'production') {
+    logger.info('Attempting to reconnect to database...');
+    setTimeout(() => {
+      // The pool will automatically try to create new connections
+    }, 5000);
+  }
+});
+
+pool.on('remove', (client) => {
+  logger.debug('Client removed from pool');
+});
+
+// Database query wrapper with error handling and retry logic
+export async function query(text, params = [], maxRetries = 3) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const client = await pool.connect();
+    try {
+      const start = Date.now();
+      const res = await client.query(text, params);
+      const duration = Date.now() - start;
+
+      if (duration > 1000) {
+        logger.warn('Slow query detected', {
+          query: text.substring(0, 100),
+          duration,
+          rows: res.rowCount
+        });
+      }
+
+      return res;
+    } catch (error) {
+      lastError = error;
+      logger.warn(`Database query error (attempt ${attempt}/${maxRetries}):`, {
+        error: error.message,
+        query: text.substring(0, 100),
+        params: params.slice(0, 5) // Only log first 5 params for security
+      });
+
+      // Check if error is retryable
+      const isRetryableError = error.code === 'ECONNREFUSED' ||
+                              error.code === 'ENOTFOUND' ||
+                              error.code === 'ETIMEDOUT' ||
+                              error.code === 'ECONNRESET' ||
+                              error.message.includes('connection');
+
+      if (!isRetryableError || attempt === maxRetries) {
+        throw error;
+      }
+
+      // Wait before retrying (exponential backoff)
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+      logger.info(`Retrying query in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    } finally {
+      client.release();
+    }
+  }
+
+  throw lastError;
 }
 
 // Database transaction wrapper

@@ -27,6 +27,18 @@ services:
         value: "90210"
       - key: SHIP_FROM_COUNTRY
         value: "US"
+      - key: DATABASE_SSL_CA
+        fromDatabase:
+          name: khloes-kicks-db
+          property: ca
+      - key: DATABASE_SSL_CERT
+        fromDatabase:
+          name: khloes-kicks-db
+          property: cert
+      - key: DATABASE_SSL_KEY
+        fromDatabase:
+          name: khloes-kicks-db
+          property: key
 
   - type: pgsql
     name: khloes-kicks-db

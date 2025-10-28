@@ -131,22 +131,36 @@ const limiter = rateLimit({
 });
 
 const strictLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes  
+  windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // limit each IP to 10 requests per windowMs for sensitive endpoints
   message: 'Too many attempts, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Initialize PostgreSQL database
-async function initializeDatabase() {
-  try {
-    await initializeTables();
-    await seedAdminUser();
-    logger.info('Database initialized successfully');
-  } catch (error) {
-    logger.error('Failed to initialize database:', error);
-    process.exit(1);
+// Initialize PostgreSQL database with retry logic
+async function initializeDatabase(maxRetries = 10, retryDelay = 5000) {
+  let retries = 0;
+
+  while (retries < maxRetries) {
+    try {
+      logger.info(`Attempting database initialization (attempt ${retries + 1}/${maxRetries})`);
+      await initializeTables();
+      await seedAdminUser();
+      logger.info('Database initialized successfully');
+      return;
+    } catch (error) {
+      retries++;
+      logger.warn(`Database initialization failed (attempt ${retries}/${maxRetries}):`, error.message);
+
+      if (retries >= maxRetries) {
+        logger.error('Failed to initialize database after maximum retries:', error);
+        process.exit(1);
+      }
+
+      logger.info(`Retrying database initialization in ${retryDelay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
   }
 }
 
