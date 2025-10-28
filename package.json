@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js",
-    "start:win": "powershell -ExecutionPolicy Bypass -File start-server.ps1"
+    "start:win": "powershell -ExecutionPolicy Bypass -File start-server.ps1",
+    "build": "echo 'No build step required'"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

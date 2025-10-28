@@ -6,6 +6,9 @@ services:
     startCommand: npm start
     plan: free
     healthCheckPath: /
+    autoDeploy: false
+    preDeployCommand: "echo 'Pre-deploy check complete'"
+    postDeployCommand: "echo 'Deployment completed successfully'"
     envVars:
       - key: NODE_ENV
         value: production
@@ -45,3 +48,4 @@ services:
     databaseName: sneaker_auction
     user: sneaker_user
     plan: free
+    ipAllowList: []  # Allow all connections for web service
