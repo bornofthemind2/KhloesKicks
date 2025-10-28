@@ -1,8 +1,130 @@
 // Product Actions JavaScript Module
 console.log('Product actions script loaded');
 
-// Global variable to store product ID
+// Global variables
 let currentProductId = null;
+let currentImageIndex = 0;
+let autoSlideshow = null;
+
+// Image Gallery Functions
+function initializeGallery() {
+    const mainImage = document.getElementById('mainImage');
+    const thumbnails = document.querySelectorAll('.thumbnail');
+    
+    if (thumbnails.length > 1) {
+        // Initialize auto slideshow
+        startSlideshow();
+        
+        // Stop slideshow on hover
+        mainImage.parentElement.addEventListener('mouseenter', stopSlideshow);
+        mainImage.parentElement.addEventListener('mouseleave', startSlideshow);
+    }
+}
+
+function startSlideshow() {
+    if (autoSlideshow) return;
+    autoSlideshow = setInterval(nextImage, 5000); // Change image every 5 seconds
+}
+
+function stopSlideshow() {
+    if (autoSlideshow) {
+        clearInterval(autoSlideshow);
+        autoSlideshow = null;
+    }
+}
+
+function nextImage() {
+    const thumbnails = document.querySelectorAll('.thumbnail');
+    if (thumbnails.length <= 1) return;
+    
+    currentImageIndex = (currentImageIndex + 1) % thumbnails.length;
+    thumbnails[currentImageIndex].click();
+}
+
+function previousImage() {
+    const thumbnails = document.querySelectorAll('.thumbnail');
+    if (thumbnails.length <= 1) return;
+    
+    currentImageIndex = (currentImageIndex - 1 + thumbnails.length) % thumbnails.length;
+    thumbnails[currentImageIndex].click();
+}
+
+function changeMainImage(imageUrl, thumbnailElement) {
+    // Update main image with fade effect
+    const mainImage = document.getElementById('mainImage');
+    mainImage.style.opacity = '0';
+    
+    setTimeout(() => {
+        mainImage.src = imageUrl;
+        mainImage.style.opacity = '1';
+        
+        // Re-initialize zoom
+        initializeZoom(mainImage);
+    }, 200);
+
+    // Initialize zoom functionality
+    function initializeZoom(image) {
+        const container = image.parentElement;
+        
+        image.addEventListener('mousemove', (e) => {
+            const { left, top, width, height } = image.getBoundingClientRect();
+            const x = (e.clientX - left) / width;
+            const y = (e.clientY - top) / height;
+            
+            image.style.transformOrigin = `${x * 100}% ${y * 100}%`;
+        });
+        
+        container.addEventListener('mouseenter', () => {
+            image.style.transform = 'scale(1.5)';
+        });
+        
+        container.addEventListener('mouseleave', () => {
+            image.style.transform = 'scale(1)';
+        });
+    }
+    
+    // Update active thumbnail
+    const thumbnails = document.querySelectorAll('.thumbnail');
+    thumbnails.forEach(thumb => thumb.classList.remove('active'));
+    thumbnailElement.classList.add('active');
+    
+    // Update current index
+    currentImageIndex = Array.from(thumbnails).indexOf(thumbnailElement);
+}
+
+// Add navigation buttons
+function addNavigationButtons() {
+    const gallery = document.querySelector('.main-image-container');
+    if (!gallery) return;
+    
+    const prevButton = document.createElement('button');
+    prevButton.className = 'nav-button prev';
+    prevButton.innerHTML = '❮';
+    prevButton.onclick = (e) => {
+        e.preventDefault();
+        previousImage();
+    };
+    
+    const nextButton = document.createElement('button');
+    nextButton.className = 'nav-button next';
+    nextButton.innerHTML = '❯';
+    nextButton.onclick = (e) => {
+        e.preventDefault();
+        nextImage();
+    };
+    
+    // Add fullscreen button
+    const fullscreenButton = document.createElement('button');
+    fullscreenButton.className = 'fullscreen-button';
+    fullscreenButton.innerHTML = '⛶';
+    fullscreenButton.onclick = (e) => {
+        e.preventDefault();
+        toggleFullscreen(gallery);
+    };
+    
+    gallery.appendChild(prevButton);
+    gallery.appendChild(nextButton);
+}
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -13,6 +135,52 @@ document.addEventListener('DOMContentLoaded', function() {
         currentProductId = window.productId;
         console.log('Product ID set to:', currentProductId);
     }
+
+    // Initialize gallery if on product/auction page
+    if (document.querySelector('.product-gallery')) {
+        initializeGallery();
+        addNavigationButtons();
+        initializeKeyboardNavigation();
+        initializeTouchNavigation();
+    }
+
+function initializeKeyboardNavigation() {
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') {
+            previousImage();
+        } else if (e.key === 'ArrowRight') {
+            nextImage();
+        }
+    });
+}
+
+function initializeTouchNavigation() {
+    const gallery = document.querySelector('.main-image-container');
+    let touchStartX = 0;
+    let touchEndX = 0;
+
+    gallery.addEventListener('touchstart', (e) => {
+        touchStartX = e.changedTouches[0].screenX;
+    }, false);
+
+    gallery.addEventListener('touchend', (e) => {
+        touchEndX = e.changedTouches[0].screenX;
+        handleSwipe();
+    }, false);
+
+    function handleSwipe() {
+        const swipeThreshold = 50;
+        const diff = touchEndX - touchStartX;
+        
+        if (Math.abs(diff) > swipeThreshold) {
+            if (diff > 0) {
+                previousImage(); // Swipe right
+            } else {
+                nextImage(); // Swipe left
+            }
+        }
+    }
+}
 });
 
 // Show create auction modal

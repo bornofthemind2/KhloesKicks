@@ -186,6 +186,9 @@ export async function initializeTables() {
         status VARCHAR(50) DEFAULT 'pending',
         stripe_session_id TEXT,
         payment_intent_id TEXT,
+        payment_gateway VARCHAR(50) DEFAULT 'stripe',
+        gateway_transaction_id TEXT,
+        gateway_fees DECIMAL(10,2) DEFAULT 0,
         created_at TIMESTAMP NOT NULL,
         FOREIGN KEY(auction_id) REFERENCES auctions(id),
         FOREIGN KEY(product_id) REFERENCES products(id),
@@ -198,9 +201,12 @@ export async function initializeTables() {
         id SERIAL PRIMARY KEY,
         order_id INTEGER NOT NULL,
         carrier VARCHAR(100),
+        service_code VARCHAR(50),
         tracking_number VARCHAR(255),
         label_pdf_path TEXT,
         status VARCHAR(50) DEFAULT 'pending',
+        shipping_cost DECIMAL(10,2) DEFAULT 0,
+        weight INTEGER DEFAULT 0,
         to_name VARCHAR(255),
         to_address1 VARCHAR(255),
         to_address2 VARCHAR(255),
@@ -212,6 +218,7 @@ export async function initializeTables() {
         box_width INTEGER,
         box_height INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(order_id) REFERENCES orders(id)
       );
     `);
@@ -232,6 +239,49 @@ export async function initializeTables() {
         display_order INTEGER DEFAULT 0,
         created_at TIMESTAMP NOT NULL,
         FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS gateway_analytics (
+        id SERIAL PRIMARY KEY,
+        gateway_name VARCHAR(50) NOT NULL,
+        transaction_count INTEGER DEFAULT 0,
+        success_rate DECIMAL(5,2) DEFAULT 0,
+        average_fee DECIMAL(10,2) DEFAULT 0,
+        total_volume DECIMAL(15,2) DEFAULT 0,
+        date DATE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS shipping_addresses (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER NOT NULL,
+        type VARCHAR(20) NOT NULL,
+        name VARCHAR(255),
+        address_line1 VARCHAR(255),
+        address_line2 VARCHAR(255),
+        city VARCHAR(100),
+        state VARCHAR(50),
+        postal_code VARCHAR(20),
+        country VARCHAR(50),
+        phone VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS shipping_labels (
+        id SERIAL PRIMARY KEY,
+        shipment_id INTEGER NOT NULL,
+        carrier VARCHAR(50) NOT NULL,
+        label_url TEXT,
+        label_format VARCHAR(20) DEFAULT 'PDF',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(shipment_id) REFERENCES shipments(id) ON DELETE CASCADE
       );
     `);
 
@@ -257,7 +307,7 @@ export async function seedAdminUser() {
     if (userCount.rows[0].count === '0') {
       // Import bcrypt dynamically
       const bcrypt = await import('bcryptjs');
-      const hash = bcrypt.hashSync('admin123', 10);
+      const hash = bcrypt.default.hashSync('admin123', 10);
       
       await query(
         'INSERT INTO users (email, password_hash, name, is_admin) VALUES ($1, $2, $3, $4)',
