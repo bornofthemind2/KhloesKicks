@@ -138,13 +138,31 @@ const strictLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Health check for database connectivity
+async function checkDatabaseHealth() {
+  try {
+    await query('SELECT 1');
+    return true;
+  } catch (error) {
+    logger.warn('Database health check failed:', error.message);
+    return false;
+  }
+}
+
 // Initialize PostgreSQL database with retry logic
-async function initializeDatabase(maxRetries = 10, retryDelay = 5000) {
+async function initializeDatabase(maxRetries = 20, retryDelay = 10000) {
   let retries = 0;
 
   while (retries < maxRetries) {
     try {
       logger.info(`Attempting database initialization (attempt ${retries + 1}/${maxRetries})`);
+
+      // First check if database is accessible
+      const isHealthy = await checkDatabaseHealth();
+      if (!isHealthy) {
+        throw new Error('Database health check failed');
+      }
+
       await initializeTables();
       await seedAdminUser();
       logger.info('Database initialized successfully');
@@ -161,6 +179,31 @@ async function initializeDatabase(maxRetries = 10, retryDelay = 5000) {
       logger.info(`Retrying database initialization in ${retryDelay}ms...`);
       await new Promise(resolve => setTimeout(resolve, retryDelay));
     }
+  }
+}
+
+// Wait for database to be ready if configured
+if (process.env.WAIT_FOR_DB === 'true') {
+  logger.info('Waiting for database to be ready...');
+  let dbReady = false;
+  let waitAttempts = 0;
+  const maxWaitAttempts = 30; // 5 minutes with 10s intervals
+
+  while (!dbReady && waitAttempts < maxWaitAttempts) {
+    try {
+      await query('SELECT 1');
+      dbReady = true;
+      logger.info('Database is ready');
+    } catch (error) {
+      waitAttempts++;
+      logger.info(`Waiting for database... (attempt ${waitAttempts}/${maxWaitAttempts})`);
+      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+    }
+  }
+
+  if (!dbReady) {
+    logger.error('Database not ready after maximum wait time');
+    process.exit(1);
   }
 }
 

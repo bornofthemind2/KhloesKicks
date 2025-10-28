@@ -9,6 +9,11 @@ services:
     autoDeploy: false
     preDeployCommand: "echo 'Pre-deploy check complete'"
     postDeployCommand: "echo 'Deployment completed successfully'"
+    dependsOn:
+      - khloes-kicks-db
+    envVars:
+      - key: WAIT_FOR_DB
+        value: "true"
     envVars:
       - key: NODE_ENV
         value: production
