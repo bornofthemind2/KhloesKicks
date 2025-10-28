@@ -149,21 +149,13 @@ function checkDatabaseHealth() {
   }
 }
 
-// Initialize PostgreSQL database with retry logic
-async function initializeDatabase(maxRetries = process.env.NODE_ENV === 'production' ? 20 : 5, retryDelay = process.env.NODE_ENV === 'production' ? 10000 : 2000) {
+// Initialize SQLite database with retry logic
+async function initializeDatabase(maxRetries = process.env.NODE_ENV === 'production' ? 10 : 3, retryDelay = process.env.NODE_ENV === 'production' ? 5000 : 1000) {
   let retries = 0;
 
   while (retries < maxRetries) {
     try {
       logger.info(`Attempting database initialization (attempt ${retries + 1}/${maxRetries})`);
-
-      // First check if database is accessible (skip in development if database might not be running)
-      if (process.env.NODE_ENV === 'production') {
-        const isHealthy = await checkDatabaseHealth();
-        if (!isHealthy) {
-          throw new Error('Database health check failed');
-        }
-      }
 
       await initializeTables();
       await seedAdminUser();
@@ -178,7 +170,7 @@ async function initializeDatabase(maxRetries = process.env.NODE_ENV === 'product
         if (process.env.NODE_ENV === 'production') {
           process.exit(1);
         } else {
-          logger.warn('Continuing without database in development mode. Make sure your local database is running.');
+          logger.warn('Continuing without database in development mode.');
           return;
         }
       }
@@ -194,7 +186,7 @@ if (process.env.WAIT_FOR_DB === 'true' && process.env.NODE_ENV === 'production')
   logger.info('Waiting for database to be ready...');
   let dbReady = false;
   let waitAttempts = 0;
-  const maxWaitAttempts = 30; // 5 minutes with 10s intervals
+  const maxWaitAttempts = 20; // 2 minutes with 6s intervals
 
   while (!dbReady && waitAttempts < maxWaitAttempts) {
     try {
@@ -204,7 +196,7 @@ if (process.env.WAIT_FOR_DB === 'true' && process.env.NODE_ENV === 'production')
     } catch (error) {
       waitAttempts++;
       logger.info(`Waiting for database... (attempt ${waitAttempts}/${maxWaitAttempts})`);
-      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+      await new Promise(resolve => setTimeout(resolve, 6000)); // Wait 6 seconds
     }
   }
 
