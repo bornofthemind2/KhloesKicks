@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
 import winston from 'winston';
 import path from 'path';
 import fs from 'fs';
@@ -31,66 +31,91 @@ if (!fs.existsSync(dbDir)) {
 }
 
 // Create SQLite database connection
-const db = new Database(dbPath, {
-  verbose: process.env.NODE_ENV !== 'production' ? console.log : null,
-  fileMustExist: false
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    logger.error('Failed to connect to SQLite database:', err);
+    throw err;
+  }
+  logger.info('Connected to SQLite database');
 });
 
 // Enable WAL mode for better concurrency
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
-db.pragma('cache_size = 1000');
-db.pragma('foreign_keys = ON');
+db.run('PRAGMA journal_mode = WAL');
+db.run('PRAGMA synchronous = NORMAL');
+db.run('PRAGMA cache_size = 1000');
+db.run('PRAGMA foreign_keys = ON');
 
 // Database health check
 function checkDatabaseHealth() {
-  try {
-    const stmt = db.prepare('SELECT 1 as health_check');
-    const result = stmt.get();
-    return result.health_check === 1;
-  } catch (error) {
-    logger.error('Database health check failed:', error.message);
-    return false;
-  }
+  return new Promise((resolve) => {
+    db.get('SELECT 1 as health_check', (err, row) => {
+      if (err) {
+        logger.error('Database health check failed:', err.message);
+        resolve(false);
+      } else {
+        resolve(row.health_check === 1);
+      }
+    });
+  });
 }
 
 // Database query wrapper with error handling
 export function query(text, params = []) {
-  try {
+  return new Promise((resolve, reject) => {
     const start = Date.now();
-    let result;
 
     if (text.trim().toUpperCase().startsWith('SELECT') || text.trim().toUpperCase().startsWith('PRAGMA')) {
-      const stmt = db.prepare(text);
-      result = { rows: stmt.all(params), rowCount: stmt.reader ? 1 : 0 };
-    } else {
-      const stmt = db.prepare(text);
-      const info = stmt.run(params);
-      result = {
-        rows: [],
-        rowCount: info.changes,
-        lastInsertRowid: info.lastInsertRowid
-      };
-    }
+      db.all(text, params, (err, rows) => {
+        if (err) {
+          logger.error('Database query error:', {
+            error: err.message,
+            query: text.substring(0, 100),
+            params: params.slice(0, 5)
+          });
+          reject(err);
+          return;
+        }
 
-    const duration = Date.now() - start;
-    if (duration > 1000) {
-      logger.warn('Slow query detected', {
-        query: text.substring(0, 100),
-        duration,
-        rows: result.rowCount
+        const duration = Date.now() - start;
+        if (duration > 1000) {
+          logger.warn('Slow query detected', {
+            query: text.substring(0, 100),
+            duration,
+            rows: rows.length
+          });
+        }
+
+        resolve({ rows, rowCount: rows.length });
+      });
+    } else {
+      db.run(text, params, function(err) {
+        if (err) {
+          logger.error('Database query error:', {
+            error: err.message,
+            query: text.substring(0, 100),
+            params: params.slice(0, 5)
+          });
+          reject(err);
+          return;
+        }
+
+        const duration = Date.now() - start;
+        if (duration > 1000) {
+          logger.warn('Slow query detected', {
+            query: text.substring(0, 100),
+            duration,
+            rows: this.changes
+          });
+        }
+
+        resolve({
+          rows: [],
+          rowCount: this.changes,
+          lastInsertRowid: this.lastID
+        });
       });
     }
-
-    return result;
-  } catch (error) {
-    logger.error('Database query error:', {
-      error: error.message,
-      query: text.substring(0, 100),
-      params: params.slice(0, 5) // Only log first 5 params for security
-    });
-    throw error;
-  }
+  });
 }
 
 // Database transaction wrapper
@@ -112,44 +137,54 @@ export async function transaction(callback) {
 
 // Helper function to prepare statements
 export function prepare(sql) {
-  const stmt = db.prepare(sql);
   return {
     get: (params = []) => {
-      try {
-        return stmt.get(Array.isArray(params) ? params : [params]) || null;
-      } catch (error) {
-        logger.error('Prepared statement get error:', { sql: sql.substring(0, 100), error: error.message });
-        throw error;
-      }
+      return new Promise((resolve, reject) => {
+        db.get(sql, Array.isArray(params) ? params : [params], (err, row) => {
+          if (err) {
+            logger.error('Prepared statement get error:', { sql: sql.substring(0, 100), error: err.message });
+            reject(err);
+          } else {
+            resolve(row || null);
+          }
+        });
+      });
     },
     all: (params = []) => {
-      try {
-        return stmt.all(Array.isArray(params) ? params : [params]);
-      } catch (error) {
-        logger.error('Prepared statement all error:', { sql: sql.substring(0, 100), error: error.message });
-        throw error;
-      }
+      return new Promise((resolve, reject) => {
+        db.all(sql, Array.isArray(params) ? params : [params], (err, rows) => {
+          if (err) {
+            logger.error('Prepared statement all error:', { sql: sql.substring(0, 100), error: err.message });
+            reject(err);
+          } else {
+            resolve(rows);
+          }
+        });
+      });
     },
     run: (params = []) => {
-      try {
-        const info = stmt.run(Array.isArray(params) ? params : [params]);
-        return {
-          lastInsertRowid: info.lastInsertRowid || null,
-          changes: info.changes || 0
-        };
-      } catch (error) {
-        logger.error('Prepared statement run error:', { sql: sql.substring(0, 100), error: error.message });
-        throw error;
-      }
+      return new Promise((resolve, reject) => {
+        db.run(sql, Array.isArray(params) ? params : [params], function(err) {
+          if (err) {
+            logger.error('Prepared statement run error:', { sql: sql.substring(0, 100), error: err.message });
+            reject(err);
+          } else {
+            resolve({
+              lastInsertRowid: this.lastID || null,
+              changes: this.changes || 0
+            });
+          }
+        });
+      });
     }
   };
 }
 
 // Initialize database tables
-export function initializeTables() {
+export async function initializeTables() {
   try {
     // Users table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
@@ -161,7 +196,7 @@ export function initializeTables() {
     `);
 
     // Products table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         brand TEXT NOT NULL,
@@ -178,7 +213,7 @@ export function initializeTables() {
     `);
 
     // Auctions table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS auctions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id INTEGER NOT NULL,
@@ -194,7 +229,7 @@ export function initializeTables() {
     `);
 
     // Bids table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS bids (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         auction_id INTEGER NOT NULL,
@@ -207,7 +242,7 @@ export function initializeTables() {
     `);
 
     // Orders table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         auction_id INTEGER,
@@ -229,7 +264,7 @@ export function initializeTables() {
     `);
 
     // Shipments table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS shipments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER NOT NULL,
@@ -257,7 +292,7 @@ export function initializeTables() {
     `);
 
     // Settings table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT,
@@ -266,7 +301,7 @@ export function initializeTables() {
     `);
 
     // Product images table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS product_images (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id INTEGER NOT NULL,
@@ -278,7 +313,7 @@ export function initializeTables() {
     `);
 
     // Gateway analytics table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS gateway_analytics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gateway_name TEXT NOT NULL,
@@ -292,7 +327,7 @@ export function initializeTables() {
     `);
 
     // Shipping addresses table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS shipping_addresses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER NOT NULL,
@@ -311,7 +346,7 @@ export function initializeTables() {
     `);
 
     // Shipping labels table
-    query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS shipping_labels (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         shipment_id INTEGER NOT NULL,
@@ -324,11 +359,11 @@ export function initializeTables() {
     `);
 
     // Create indexes for better performance
-    query(`CREATE INDEX IF NOT EXISTS idx_auctions_status ON auctions(status);`);
-    query(`CREATE INDEX IF NOT EXISTS idx_auctions_end_time ON auctions(end_time);`);
-    query(`CREATE INDEX IF NOT EXISTS idx_products_featured ON products(is_featured);`);
-    query(`CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);`);
-    query(`CREATE INDEX IF NOT EXISTS idx_bids_auction_id ON bids(auction_id);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_auctions_status ON auctions(status);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_auctions_end_time ON auctions(end_time);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_products_featured ON products(is_featured);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_bids_auction_id ON bids(auction_id);`);
 
     logger.info('Database tables initialized successfully');
   } catch (error) {
@@ -338,16 +373,16 @@ export function initializeTables() {
 }
 
 // Seed admin user if none exists
-export function seedAdminUser() {
+export async function seedAdminUser() {
   try {
-    const userCount = query('SELECT COUNT(*) as count FROM users');
+    const userCount = await query('SELECT COUNT(*) as count FROM users');
 
     if (userCount.rows[0].count === 0) {
       // Import bcrypt dynamically
-      const bcrypt = require('bcryptjs');
-      const hash = bcrypt.hashSync('admin123', 10);
+      const bcrypt = await import('bcryptjs');
+      const hash = bcrypt.default.hashSync('admin123', 10);
 
-      query(
+      await query(
         'INSERT INTO users (email, password_hash, name, is_admin) VALUES (?, ?, ?, ?)',
         ['admin@example.com', hash, 'Admin', 1]
       );
@@ -362,12 +397,16 @@ export function seedAdminUser() {
 
 // Graceful shutdown
 export function closeConnection() {
-  try {
-    db.close();
-    logger.info('Database connection closed');
-  } catch (error) {
-    logger.error('Error closing database connection:', error);
-  }
+  return new Promise((resolve) => {
+    db.close((err) => {
+      if (err) {
+        logger.error('Error closing database connection:', err);
+      } else {
+        logger.info('Database connection closed');
+      }
+      resolve();
+    });
+  });
 }
 
 // Handle process termination
