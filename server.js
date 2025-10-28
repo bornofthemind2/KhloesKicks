@@ -2153,8 +2153,8 @@ app.post('/api/products/:id/toggle-availability', ensureAdmin, (req, res) => {
 app.get('/admin/shipping', ensureAdmin, async (req, res) => {
   try {
     // Get pending shipments (paid orders without shipments)
-    const pendingShipments = db.prepare(`
-      SELECT o.*, 
+    const pendingShipments = await prepare(`
+      SELECT o.*,
         u.email as buyer_email,
         p.name as product_name, p.brand,
         s.to_city, s.to_state
@@ -2168,7 +2168,7 @@ app.get('/admin/shipping', ensureAdmin, async (req, res) => {
     `).all();
 
     // Get active shipments
-    const activeShipments = db.prepare(`
+    const activeShipments = await prepare(`
       SELECT s.*, o.id as order_id
       FROM shipments s
       JOIN orders o ON o.id = s.order_id
@@ -2177,17 +2177,18 @@ app.get('/admin/shipping', ensureAdmin, async (req, res) => {
     `).all();
 
     // Get in-transit shipments
-    const inTransitShipments = activeShipments.filter(s => 
+    const inTransitShipments = activeShipments.filter(s =>
       ['in_transit', 'out_for_delivery', 'shipped'].includes(s.status)
     );
 
     // Get delivered today count
     const today = dayjs().format('YYYY-MM-DD');
-    const deliveredToday = db.prepare(`
+    const deliveredTodayResult = await prepare(`
       SELECT COUNT(*) as count
       FROM shipments
-      WHERE status = 'delivered' AND DATE(actual_delivery) = ?
-    `).get(today)?.count || 0;
+      WHERE status = 'delivered' AND DATE(actual_delivery) = $1
+    `).get([today]);
+    const deliveredToday = deliveredTodayResult?.count || 0;
 
     // Get available carriers
     const availableCarriers = shippingManager.getAvailableCarriers();
