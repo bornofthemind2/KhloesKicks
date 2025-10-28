@@ -1,10 +1,1 @@
-{
-  "projectId": "prj_sneaker-auction",
-  "orgId": "your-org-id",
-  "settings": {
-    "framework": "node",
-    "buildCommand": "npm install",
-    "outputDirectory": ".",
-    "devCommand": "npm run dev"
-  }
-}
+{"projectId":"prj_lJr8XHVxVAMdPqQdtgoauQ9xvN4n","orgId":"team_fEH9j3POFEMx9WeoxoKldUZB","projectName":"khloes-kicks"}
