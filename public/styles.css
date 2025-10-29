@@ -12,10 +12,11 @@ body { font-family: Arial, sans-serif; margin: 0; background: #fafafa; color: #2
   box-shadow: 0 2px 6px rgba(0,0,0,0.12);
   position: fixed;
   top: 0;
-  left: 0;
-  right: 0;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1000;
-  width: 100%;
+  width: 1000px;
+  max-width: calc(100% - 32px);
 }
 .topbar a { 
   color: #ffffff; 
