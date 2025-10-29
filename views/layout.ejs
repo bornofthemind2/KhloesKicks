@@ -8,32 +8,32 @@
   <link rel="stylesheet" href="/public/styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <a href="/" class="brand">
-      <img src="/public/logo.png" alt="Khloes Kicks" class="logo" />
-      <span>Khloes Kicks</span>
-    </a>
-    <nav>
-      <% if (typeof user !== 'undefined' && user) { %>
-        <span>Hi, <%= user.name || user.email %></span>
-        <% if (user.is_admin) { %>
-          <a href="/admin/sales">Sales</a>
-          <a href="/admin/shipping">Shipping</a>
-          <a href="/admin/import">Import</a>
-          <a href="/products">Products</a>
-          <a href="/admin/connect">Payments</a>
-        <% } else { %>
-          <a href="/my-orders">My Orders</a>
-          <a href="/track">Track Package</a>
-        <% } %>
-        <a href="/logout">Logout</a>
-      <% } else { %>
-        <a href="/register">Register</a>
-        <a href="/login">Login</a>
-      <% } %>
-    </nav>
-  </header>
   <main class="container">
+    <header class="topbar">
+      <a href="/" class="brand">
+        <img src="/public/logo.png" alt="Khloes Kicks" class="logo" />
+        <span>Khloes Kicks</span>
+      </a>
+      <nav>
+        <% if (typeof user !== 'undefined' && user) { %>
+          <span>Hi, <%= user.name || user.email %></span>
+          <% if (user.is_admin) { %>
+            <a href="/admin/sales">Sales</a>
+            <a href="/admin/shipping">Shipping</a>
+            <a href="/admin/import">Import</a>
+            <a href="/products">Products</a>
+            <a href="/admin/connect">Payments</a>
+          <% } else { %>
+            <a href="/my-orders">My Orders</a>
+            <a href="/track">Track Package</a>
+          <% } %>
+          <a href="/logout">Logout</a>
+        <% } else { %>
+          <a href="/register">Register</a>
+          <a href="/login">Login</a>
+        <% } %>
+      </nav>
+    </header>
     <%- body %>
   </main>
   <footer class="footer">
