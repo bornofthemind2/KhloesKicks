@@ -1,15 +1,21 @@
 /* Basic styles */
 body { font-family: Arial, sans-serif; margin: 0; background: #fafafa; color: #222; }
-.topbar { 
-  display: flex; 
-  justify-content: space-between; 
-  align-items: center; 
-  padding: 12px 16px; 
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
   /* Python-inspired gradient (blue -> yellow) */
   background: linear-gradient(90deg, #306998 0%, #FFD43B 100%);
-  color: #ffffff; 
+  color: #ffffff;
   border-bottom: none;
   box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  width: 100%;
 }
 .topbar a { 
   color: #ffffff; 
@@ -72,7 +78,7 @@ body { font-family: Arial, sans-serif; margin: 0; background: #fafafa; color: #2
     height: 32px;
   }
 }
-.container { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+.container { max-width: 1000px; margin: 80px auto 24px auto; padding: 0 16px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 .card {
   background: #fff;
